@@ -23,11 +23,8 @@ jobs:
 
     - name: Build APK with Gradle
       run: |
-        if [ -f "gradlew" ]; then
-          ./gradlew assembleRelease
-        else
-          gradle assembleRelease
-        fi
+        chmod +x gradlew
+        ./gradlew :app:assembleRelease
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
