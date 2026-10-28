@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1E1E2C"
+    android:padding="24dp">
+
+    <!-- Butki Title -->
+    <TextView
+        android:id="@+id/titleText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="B U T K I  A.I."
+        android:textAlignment="center"
+        android:textColor="#FF4081"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:layout_marginTop="40dp"
+        android:letterSpacing="0.2"/>
+
+    <!-- Beech ka Hissa: Avatar aur Jawab -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:orientation="vertical"
+        android:gravity="center">
+
+        <!-- Gol Avatar Card -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="140dp"
+            android:layout_height="140dp"
+            app:cardCornerRadius="70dp"
+            app:cardBackgroundColor="#2A2A3D"
+            app:cardElevation="20dp"
+            android:layout_marginBottom="24dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:text="👩🏻‍💼" 
+                android:textSize="70sp"
+                android:gravity="center"/>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Response / Status Text -->
+        <TextView
+            android:id="@+id/txtResponse"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Namaste! Mic button dabakar kuch boliye..."
+            android:textSize="18sp"
+            android:textColor="#FFFFFF"
+            android:background="#2A2A3D"
+            android:padding="16dp"
+            android:gravity="center"
+            android:layout_marginHorizontal="16dp" />
+            
+    </LinearLayout>
+
+    <!-- Niche Bada Sa Mic Button (Direct Voice Input) -->
+    <Button
+        android:id="@+id/btnMic"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:text="🎤"
+        android:textSize="32sp"
+        android:backgroundTint="#FF4081"
+        android:textColor="#FFFFFF"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="50dp" />
+
+</RelativeLayout>
