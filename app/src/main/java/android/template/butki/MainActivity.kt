@@ -48,18 +48,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSpeaking = false
+    private var isWaitingForWakeWord = true // Wake Word flag
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = Color.parseColor("#05050A")
 
-        // XML file ko bypass karke seedha High-Tech Animated UI load karega
         setupFuturisticUI()
-
         tts = TextToSpeech(this, this)
 
-        // Aapki key do hisson mein (GitHub Secret Scanner se bachane ke liye)
         val keyPart1 = "AQ.Ab8RN6"
         val keyPart2 = "LxUmOiNNoF2b0O5guB6n5gz3vlGSwUcbJOcjT42KJzPA"
         
@@ -77,7 +75,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setPadding(45, 80, 45, 60)
         }
 
-        // 1. Top Cyberpunk Header
         val headerLayout = LinearLayout(this).apply {
             id = View.generateViewId()
             orientation = LinearLayout.VERTICAL
@@ -98,7 +95,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtStatus = TextView(this).apply {
-            text = "● SYSTEM ONLINE // AUTO-VOICE ACTIVE"
+            text = "● WAITING FOR 'HEY BUTKI'..."
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#FF007F"))
@@ -111,7 +108,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         headerLayout.addView(txtStatus)
         root.addView(headerLayout)
 
-        // 2. Center Live Animated Sci-Fi Neon Visualizer
         neonVisualizer = NeonOrbView(this).apply {
             layoutParams = RelativeLayout.LayoutParams(750, 750).apply {
                 addRule(RelativeLayout.CENTER_IN_PARENT)
@@ -119,7 +115,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         root.addView(neonVisualizer)
 
-        // 3. Bottom Glassmorphism Subtitle Console (NO MIC BUTTON!)
         val cardBg = GradientDrawable().apply {
             setColor(Color.parseColor("#121225"))
             cornerRadius = 45f
@@ -154,7 +149,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtResponse = TextView(this).apply {
-            text = "Hey! Main Butki hoon. Bina kisi button ke seedha boliye, main sun rahi hoon..."
+            text = "Pehle boliye: \"Hey Butki\"... Phir apna sawal puhiye!"
             textSize = 16f
             setTextColor(Color.parseColor("#F5F5FF"))
             setLineSpacing(10f, 1.0f)
@@ -182,7 +177,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setupContinuousSpeechRecognizer()
         } else {
             txtStatus.text = "● MIC PERMISSION DENIED"
-            txtResponse.text = "Mujhse baat karne ke liye App Settings mein jaakar Microphone permission allow karein."
+            txtResponse.text = "Microphone permission allow karein."
         }
     }
 
@@ -199,13 +194,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 if (!isSpeaking) {
-                    txtStatus.text = "● LISTENING TO YOU (HANDS-FREE)..."
+                    if (isWaitingForWakeWord) {
+                        txtStatus.text = "● WAITING FOR 'HEY BUTKI'..."
+                    } else {
+                        txtStatus.text = "● LISTENING TO YOUR COMMAND..."
+                    }
                     neonVisualizer.setMode(0)
                 }
             }
 
             override fun onBeginningOfSpeech() {
-                txtStatus.text = "● RECEIVING VOICE WAVE..."
+                if (isWaitingForWakeWord) {
+                    txtStatus.text = "● LISTENING..."
+                } else {
+                    txtStatus.text = "● RECEIVING COMMAND..."
+                }
             }
 
             override fun onRmsChanged(rmsdB: Float) {
@@ -218,32 +221,54 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             override fun onEndOfSpeech() {
                 neonVisualizer.updateVoiceLevel(1f)
-                txtStatus.text = "● ANALYZING..."
             }
 
             override fun onError(error: Int) {
                 neonVisualizer.updateVoiceLevel(1f)
                 if (!isSpeaking) {
-                    restartListeningWithDelay(500)
+                    restartListeningWithDelay(400)
                 }
             }
 
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val spokenText = matches?.firstOrNull() ?: ""
+                val spokenText = matches?.firstOrNull()?.lowercase() ?: ""
+
                 if (spokenText.isNotEmpty()) {
-                    txtResponse.text = "Aap: \"$spokenText\""
-                    askButki(spokenText)
+                    if (isWaitingForWakeWord) {
+                        // Check if user said "butki" or "hey butki"
+                        if (spokenText.contains("butki")) {
+                            isWaitingForWakeWord = false
+                            txtResponse.text = "Ji! Boliye, main sun rahi hoon..."
+                            speakOut("Haan boliye, main sun rahi hoon!")
+                        } else {
+                            restartListeningWithDelay(200)
+                        }
+                    } else {
+                        // Wake word already detected, now this is the actual prompt!
+                        txtResponse.text = "Aap: \"$spokenText\""
+                        askButki(spokenText)
+                    }
                 } else {
-                    restartListeningWithDelay(400)
+                    restartListeningWithDelay(300)
                 }
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val partialText = matches?.firstOrNull() ?: ""
+                val partialText = matches?.firstOrNull()?.lowercase() ?: ""
+                
                 if (partialText.isNotEmpty() && !isSpeaking) {
-                    txtResponse.text = "Sun rahi hoon: \"$partialText...\""
+                    if (isWaitingForWakeWord) {
+                        if (partialText.contains("butki")) {
+                            speechRecognizer?.stopListening()
+                            isWaitingForWakeWord = false
+                            txtResponse.text = "Ji sun liya! Boliye..."
+                            speakOut("Haan boliye!")
+                        }
+                    } else {
+                        txtResponse.text = "Sun rahi hoon: \"$partialText...\""
+                    }
                 }
             }
 
@@ -258,7 +283,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 speechRecognizer?.startListening(recognizerIntent)
             } catch (e: Exception) {
-                restartListeningWithDelay(1000)
+                restartListeningWithDelay(800)
             }
         }
     }
@@ -280,9 +305,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val personaPrompt = "You are Butki, a sweet, caring, witty, and loving female AI companion. Reply in 1-2 short sentences in natural Hinglish/Hindi so it sounds great when spoken aloud: $prompt"
+                val personaPrompt = "You are Butki, a sweet, caring, witty female AI companion. Reply in 1-2 short sentences in natural Hinglish/Hindi: $prompt"
                 val response = generativeModel.generateContent(personaPrompt)
-                val answer = response.text?.replace("*", "") ?: "Kuch samajh nahi aaya, fir se bolo na?"
+                val answer = response.text?.replace("*", "") ?: "Kuch samajh nahi aaya."
 
                 withContext(Dispatchers.Main) {
                     txtResponse.text = answer
@@ -290,11 +315,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    txtStatus.text = "● API / NETWORK ERROR"
+                    txtStatus.text = "● ERROR"
                     txtResponse.text = "Error: ${e.localizedMessage}"
                     isSpeaking = false
+                    isWaitingForWakeWord = true
                     neonVisualizer.setMode(0)
-                    restartListeningWithDelay(3000)
+                    restartListeningWithDelay(2000)
                 }
             }
         }
@@ -327,6 +353,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.setMode(0)
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
+                        isWaitingForWakeWord = true // Wapas 'Hey Butki' ke wait par chala jayega!
                         restartListeningWithDelay(400)
                     }
                 }
@@ -336,6 +363,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.setMode(0)
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
+                        isWaitingForWakeWord = true
                         restartListeningWithDelay(400)
                     }
                 }
@@ -353,7 +381,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
-    // Custom 60FPS Sci-Fi Neon HUD Graphic Engine
     class NeonOrbView(context: Context) : View(context) {
         private val cyanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -381,7 +408,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         private var angle = 0f
         private var voicePulse = 1f
-        private var mode = 0 // 0 = Listening, 1 = Thinking, 2 = Speaking
+        private var mode = 0
         private val rect = RectF()
 
         init {
@@ -417,22 +444,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             val cy = height / 2f
             val baseR = (width.coerceAtMost(height) / 3.2f) + (voicePulse * 8f)
 
-            // Inner glowing core
             canvas.drawCircle(cx, cy, baseR * 0.72f, corePaint)
 
-            // Rotating Outer Cyan Cyber Arcs
             rect.set(cx - baseR, cy - baseR, cx + baseR, cy + baseR)
             canvas.drawArc(rect, angle, 75f, false, cyanPaint)
             canvas.drawArc(rect, angle + 120f, 75f, false, cyanPaint)
             canvas.drawArc(rect, angle + 240f, 75f, false, cyanPaint)
 
-            // Counter-Rotating Neon Pink Energy Ring
             val r2 = baseR * 0.84f
             rect.set(cx - r2, cy - r2, cx + r2, cy + r2)
             canvas.drawArc(rect, -angle * 1.4f, 110f, false, pinkPaint)
             canvas.drawArc(rect, -angle * 1.4f + 180f, 110f, false, pinkPaint)
 
-            // Dynamic Soundwave Rays around the Orb
             for (i in 0 until 24) {
                 val rad = Math.toRadians((i * 15 + angle).toDouble())
                 val inner = baseR * 1.06f
@@ -445,7 +468,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 canvas.drawLine(sx, sy, ex, ey, if (i % 2 == 0) cyanPaint else pinkPaint)
             }
 
-            // Center Glowing Emblem
             val textY = cy - ((textPaint.descent() + textPaint.ascent()) / 2)
             canvas.drawText("B", cx, textY, textPaint)
         }
