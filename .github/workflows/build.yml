@@ -18,17 +18,16 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew || true
+    - name: Install Gradle
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gradle
 
     - name: Build APK with Gradle
-      run: |
-        chmod +x gradlew
-        ./gradlew :app:assembleRelease
+      run: gradle :app:assembleRelease
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: Butki-App-APK
         path: app/build/outputs/apk/release/app-release-unsigned.apk
-        
