@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -45,6 +46,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var recognizerIntent: Intent
     private lateinit var generativeModel: GenerativeModel
+    private lateinit var audioManager: AudioManager
 
     private lateinit var txtResponse: TextView
     private lateinit var txtStatus: TextView
@@ -90,6 +92,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         window.statusBarColor = Color.parseColor("#05050A")
 
         setupFuturisticUI()
+        
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         tts = TextToSpeech(this, this)
 
         val keyPart1 = "AQ.Ab8RN6"
@@ -291,7 +295,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 if (spokenText.isNotEmpty()) {
                     if (isAskingNotificationPermission) {
-                        // Haan ya Na samajhna notification ke liye
                         if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("padh") || spokenText.contains("sunao") || spokenText.contains("thik hai")) {
                             isAskingNotificationPermission = false
                             isWaitingForWakeWord = true
@@ -312,6 +315,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     } else if (isWaitingForWakeWord) {
                         if (spokenText.contains("butki")) {
                             isWaitingForWakeWord = false
+                            // Beep unmute karna zaroori hai taki response sunayi de
+                            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
                             txtResponse.text = "Ji! Boliye Boss, main sun rahi hoon..."
                             speakOut("Haan boliye Boss, main sun rahi hoon!")
                         } else {
@@ -335,6 +340,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (partialText.contains("butki")) {
                             speechRecognizer?.stopListening()
                             isWaitingForWakeWord = false
+                            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
                             txtResponse.text = "Ji sun liya! Boliye Boss..."
                             speakOut("Haan boliye Boss!")
                         }
@@ -353,7 +359,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun startListeningLoop() {
         if (!isSpeaking) {
             try {
+                // Mic shuru hone se theek pehle system volume mute karna taki beep na aaye
+                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
+                
                 speechRecognizer?.startListening(recognizerIntent)
+                
+                // Mic successfully start hone ke baad (400ms delay) wapas unmute kar dena
+                mainHandler.postDelayed({
+                    try {
+                        audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0)
+                    } catch (e: Exception) {}
+                }, 400)
             } catch (e: Exception) {
                 restartListeningWithDelay(800)
             }
