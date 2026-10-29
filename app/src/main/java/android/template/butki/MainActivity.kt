@@ -58,7 +58,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var savedSchedule: String = "Abhi tak koi schedule ya time table set nahi kiya hai aapne. Mujhe bataiye, main yaad rakh lungi!"
     private var savedTasks: MutableList<String> = mutableListOf()
 
-    // Smart Notification & Reply States
     private var isAskingNotificationPermission = false
     private var isAskingToReply = false
     private var isWaitingForReplyText = false
@@ -117,6 +116,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         checkNotificationPermission()
         checkPermissionsAndStart()
+    }
+
+    // YAHAN NAYA FIX HAI: App me wapas aane par UI theek karne ke liye
+    override fun onResume() {
+        super.onResume()
+        val cn = ComponentName(this, ButkiNotificationService::class.java)
+        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        val enabled = flat != null && flat.contains(cn.flattenToString())
+        
+        if (enabled && ::txtResponse.isInitialized && txtResponse.text.toString().contains("allow kijiye")) {
+            txtResponse.text = "● Permission Granted! System Ready. Boliye: \"Hey Butki\""
+        }
     }
 
     private fun checkNotificationPermission() {
@@ -309,8 +320,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
 
                 if (spokenText.isNotEmpty()) {
-                    
-                    // State 1: Padhne ki permission
                     if (isAskingNotificationPermission) {
                         if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("padh") || spokenText.contains("sunao") || spokenText.contains("thik hai")) {
                             isAskingNotificationPermission = false
@@ -333,7 +342,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             speakOut("Theek hai Boss, main ise ignore kar rahi hoon.")
                         }
                     } 
-                    // State 2: Reply karne ki permission
                     else if (isAskingToReply) {
                         if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("karo") || spokenText.contains("bhej")) {
                             isAskingToReply = false
@@ -347,7 +355,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             speakOut("Theek hai Boss, main koi reply nahi bhej rahi.")
                         }
                     }
-                    // State 3: Reply Message Sunna aur Bhejna
                     else if (isWaitingForReplyText) {
                         isWaitingForReplyText = false
                         isWaitingForWakeWord = true
@@ -361,7 +368,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             speakOut("Sorry Boss, lagta hai yeh app direct reply support nahi karti.")
                         }
                     } 
-                    // State 4: Normal AI Chat (Wake Word)
                     else if (isWaitingForWakeWord) {
                         if (containsButki) {
                             isWaitingForWakeWord = false
@@ -371,7 +377,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             restartListeningWithDelay(300)
                         }
                     } 
-                    // State 5: Gemini AI prompt
                     else {
                         txtResponse.text = "Aapne kaha: \"$spokenText\""
                         askButki(spokenText)
@@ -506,7 +511,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
                         
-                        // Check karenge ki Butki aapse agla sawal toh nahi puchne wali
                         if (!isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
                             isWaitingForWakeWord = true
                             txtResponse.text = "● Waiting in background..."
