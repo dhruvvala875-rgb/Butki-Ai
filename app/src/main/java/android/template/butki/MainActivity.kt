@@ -242,8 +242,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     if (isWaitingForWakeWord) {
                         if (spokenText.contains("butki")) {
                             isWaitingForWakeWord = false
-                            txtResponse.text = "Ji! Boliye, main sun rahi hoon..."
-                            speakOut("Haan boliye, main sun rahi hoon!")
+                            txtResponse.text = "Ji! Boliye Boss, main sun rahi hoon..."
+                            speakOut("Haan boliye Boss, main sun rahi hoon!")
                         } else {
                             restartListeningWithDelay(200)
                         }
@@ -265,8 +265,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (partialText.contains("butki")) {
                             speechRecognizer?.stopListening()
                             isWaitingForWakeWord = false
-                            txtResponse.text = "Ji sun liya! Boliye..."
-                            speakOut("Haan boliye!")
+                            txtResponse.text = "Ji sun liya! Boliye Boss..."
+                            speakOut("Haan boliye Boss!")
                         }
                     } else {
                         txtResponse.text = "Sun rahi hoon: \"$partialText...\""
@@ -318,16 +318,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 val personaPrompt = """
                     You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
+                    CRITICAL RULE: You must ALWAYS address the user as "Boss" in a sweet, affectionate, and respectful way. Never use terms like "Babu" or "Jaan".
+                    
                     User's Saved Schedule & Time Table context: "$savedSchedule"
                     User's Saved Tasks: "$savedTasks"
                     
-                    Language Rule: Detect the language of the user's input. If the user speaks in English, reply in natural, sweet English. If the user speaks in Hindi or Hinglish, reply in warm, conversational Hinglish/Hindi.
-                    Always reply in 1-2 short sentences. Keep the tone extremely affectionate, polite, and slightly teasing or naughty when appropriate.
+                    Study Helper Rule: If the user asks a complex, educational, scientific, or difficult question, EXPLAIN IT EXTREMELY SIMPLY using relatable, everyday real-life examples. Act like a smart, supportive study partner who makes hard concepts easy to understand.
+                    
+                    Language Rule: Detect the language of the user's input. Reply in English if asked in English. Reply in conversational Hinglish/Hindi if asked in Hindi/Hinglish.
+                    Always reply in short, natural sentences suitable for voice output. Keep the tone extremely affectionate, polite, and slightly teasing when appropriate.
                     User's input: $prompt
                 """.trimIndent()
 
                 val response = generativeModel.generateContent(personaPrompt)
-                val answer = response.text?.replace("*", "") ?: "Hmm? Kuch keh rahe the aap? Main toh aaphi ko soch rahi thi..."
+                val answer = response.text?.replace("*", "") ?: "Hmm? Kuch samajh nahi aaya Boss, phir se bataiye na..."
 
                 withContext(Dispatchers.Main) {
                     txtResponse.text = answer
