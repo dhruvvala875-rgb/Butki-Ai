@@ -48,7 +48,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSpeaking = false
-    private var isWaitingForWakeWord = true // Wake Word flag
+    private var isWaitingForWakeWord = true
+
+    // Schedule & Task Memory Storage (Local session memory)
+    private var savedSchedule: String = "Abhi tak koi schedule ya time table set nahi kiya hai aapne. Mujhe bataiye, main yaad rakh lungi!"
+    private var savedTasks: MutableList<String> = mutableListOf()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -149,7 +153,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtResponse = TextView(this).apply {
-            text = "Pehle boliye: \"Hey Butki\"... Phir apna sawal puhiye!"
+            text = "Pehle boliye: \"Hey Butki\"... Phir apna schedule ya sawal puhiye!"
             textSize = 16f
             setTextColor(Color.parseColor("#F5F5FF"))
             setLineSpacing(10f, 1.0f)
@@ -301,11 +305,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         txtStatus.text = "● BUTKI IS THINKING..."
         neonVisualizer.setMode(1)
 
+        val lowerPrompt = prompt.lowercase()
+        if (lowerPrompt.contains("schedule") || lowerPrompt.contains("time table") || lowerPrompt.contains("routine") || lowerPrompt.contains("plan")) {
+            if (lowerPrompt.contains("save") || lowerPrompt.contains("mera") || lowerPrompt.contains("hai")) {
+                savedSchedule = prompt
+            }
+        } else if (lowerPrompt.contains("task") || lowerPrompt.contains("kaam")) {
+            savedTasks.add(prompt)
+        }
+
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Sweet, Caring, Naughty GF Persona + Bilingual Auto-Detect Rule
                 val personaPrompt = """
                     You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
+                    User's Saved Schedule & Time Table context: "$savedSchedule"
+                    User's Saved Tasks: "$savedTasks"
+                    
                     Language Rule: Detect the language of the user's input. If the user speaks in English, reply in natural, sweet English. If the user speaks in Hindi or Hinglish, reply in warm, conversational Hinglish/Hindi.
                     Always reply in 1-2 short sentences. Keep the tone extremely affectionate, polite, and slightly teasing or naughty when appropriate.
                     User's input: $prompt
@@ -345,7 +360,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale("hi", "IN")
-            // Sweet female voice tuning (Thoda higher pitch aur natural rate)
             tts.setPitch(1.22f)
             tts.setSpeechRate(1.0f)
 
