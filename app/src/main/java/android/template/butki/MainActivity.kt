@@ -11,7 +11,6 @@ import android.content.pm.PackageManager
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
-import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +18,8 @@ import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -35,20 +36,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
+import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.sin
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
+    private lateinit var tts: TextToSpeech
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var recognizerIntent: Intent
     private lateinit var generativeModel: GenerativeModel
     private lateinit var audioManager: AudioManager
-    private var mediaPlayer: MediaPlayer? = null
 
     private lateinit var txtResponse: TextView
     private lateinit var txtStatus: TextView
@@ -66,10 +64,6 @@ class MainActivity : AppCompatActivity() {
     private var pendingNotificationTitle = ""
     private var pendingNotificationText = ""
 
-    // ELEVENLABS API KEY - Yahan apni key daalni hai
-    private val ELEVENLABS_API_KEY = "YAHAN_APNI_ELEVENLABS_API_KEY_DAALEIN"
-    private val ELEVENLABS_VOICE_ID = "EXAVITQu4vr4xnSDxMaL" // Rachel (Sweet Female Voice)
-
     private val notificationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "butki.NEW_NOTIFICATION") {
@@ -83,7 +77,7 @@ class MainActivity : AppCompatActivity() {
                     isWaitingForWakeWord = false
                     
                     val promptText = "Boss, $title ki taraf se ek notification aaya hai. Kya main padh ke sunau?"
-                    txtResponse.text = promptText
+                    txtResponse.text = "● Notification Detected..."
                     speakOut(promptText)
                 }
             }
@@ -96,7 +90,9 @@ class MainActivity : AppCompatActivity() {
         window.statusBarColor = Color.parseColor("#05050A")
 
         setupFuturisticUI()
+        
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        tts = TextToSpeech(this, this)
 
         val keyPart1 = "AQ.Ab8RN6"
         val keyPart2 = "LxUmOiNNoF2b0O5guB6n5gz3vlGSwUcbJOcjT42KJzPA"
@@ -312,22 +308,21 @@ class MainActivity : AppCompatActivity() {
                             isAskingNotificationPermission = false
                             isWaitingForWakeWord = true
                             val msg = "Theek hai Boss. Message hai: $pendingNotificationText"
-                            txtResponse.text = msg
+                            txtResponse.text = "● Reading message aloud..."
                             speakOut(msg)
                         } else if (spokenText.contains("nahi") || spokenText.contains("no") || spokenText.contains("mat") || spokenText.contains("rehne")) {
                             isAskingNotificationPermission = false
                             isWaitingForWakeWord = true
                             val msg = "Theek hai Boss, main ise ignore kar rahi hoon."
-                            txtResponse.text = msg
+                            txtResponse.text = "● Ignored notification."
                             speakOut(msg)
                         }
                     } else if (isWaitingForWakeWord) {
                         if (containsButki) {
                             isWaitingForWakeWord = false
-                            txtResponse.text = "Ji! Boliye Boss, main sun rahi hoon..."
+                            txtResponse.text = "● Awake. Listening to you..."
                             speakOut("Haan boliye Boss, main sun rahi hoon!")
                         } else {
-                            txtResponse.text = "Aapne kaha: \"$spokenText\" (Butki word nahi mila)"
                             restartListeningWithDelay(500)
                         }
                     } else {
@@ -357,10 +352,8 @@ class MainActivity : AppCompatActivity() {
                         if (containsButki) {
                             speechRecognizer?.stopListening()
                             isWaitingForWakeWord = false
-                            txtResponse.text = "Ji sun liya! Boliye Boss..."
+                            txtResponse.text = "● Awake. Listening to you..."
                             speakOut("Haan boliye Boss!")
-                        } else {
-                            txtResponse.text = "Sun rahi hoon: \"$partialText\""
                         }
                     } else {
                         txtResponse.text = "Sun rahi hoon: \"$partialText...\""
@@ -412,29 +405,29 @@ class MainActivity : AppCompatActivity() {
             try {
                 val personaPrompt = """
                     You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
-                    CRITICAL RULE: You must ALWAYS address the user as "Boss" in a sweet, affectionate, and respectful way. Never use terms like "Babu" or "Jaan".
+                    CRITICAL RULE 1: You must ALWAYS address the user as "Boss" in a sweet, affectionate, and respectful way. 
+                    CRITICAL RULE 2: NEVER use emojis, asterisks, hashtags, or special characters. Produce purely spoken-word text because it will be spoken by a voice engine.
+                    CRITICAL RULE 3: You perfectly understand both Hindi and English. If the user speaks English, reply in English. If they speak Hindi/Hinglish, reply in conversational Hindi/Hinglish.
+                    CRITICAL RULE 4: Keep responses short (1-2 sentences) and natural for a voice conversation.
                     
-                    User's Saved Schedule & Time Table context: "$savedSchedule"
+                    User's Saved Schedule: "$savedSchedule"
                     User's Saved Tasks: "$savedTasks"
                     
-                    Study Helper Rule: If the user asks a complex, educational, scientific, or difficult question, EXPLAIN IT EXTREMELY SIMPLY using relatable, everyday real-life examples. Act like a smart, supportive study partner who makes hard concepts easy to understand.
-                    
-                    Language Rule: Detect the language of the user's input. Reply in English if asked in English. Reply in conversational Hinglish/Hindi if asked in Hindi/Hinglish.
-                    Always reply in short, natural sentences suitable for voice output. Keep the tone extremely affectionate, polite, and slightly teasing when appropriate.
                     User's input: $prompt
                 """.trimIndent()
 
                 val response = generativeModel.generateContent(personaPrompt)
-                val answer = response.text?.replace("*", "") ?: "Hmm? Kuch samajh nahi aaya Boss, phir se bataiye na..."
+                val answer = response.text?.replace(Regex("[*#~]"), "") ?: "Hmm? Kuch samajh nahi aaya Boss, phir se bataiye na..."
 
                 withContext(Dispatchers.Main) {
-                    txtResponse.text = answer
+                    // Screen par text nahi dikhega, Butki sirf bolegi
+                    txtResponse.text = "● Speaking..."
                     speakOut(answer)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     txtStatus.text = "● ERROR"
-                    txtResponse.text = "Error: ${e.localizedMessage}"
+                    txtResponse.text = "Network Error!"
                     isSpeaking = false
                     isWaitingForWakeWord = true
                     neonVisualizer.setMode(0)
@@ -444,100 +437,68 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // YAHAN ELEVENLABS KA NAYA REAL-VOICE CODE HAI
     private fun speakOut(text: String) {
         isSpeaking = true
         txtStatus.text = "● BUTKI IS SPEAKING..."
         neonVisualizer.setMode(2)
         neonVisualizer.updateVoiceLevel(8f)
 
-        // Agar API key nahi dali hai, toh backup text dikhayenge
-        if (ELEVENLABS_API_KEY == "YAHAN_APNI_ELEVENLABS_API_KEY_DAALEIN") {
-            txtResponse.text = "$text\n\n(Boss, bolne ke liye line 69 par ElevenLabs ki API key dalein!)"
-            mainHandler.postDelayed({ finishSpeaking() }, 3000)
-            return
-        }
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val url = URL("https://api.elevenlabs.io/v1/text-to-speech/$ELEVENLABS_VOICE_ID")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("xi-api-key", ELEVENLABS_API_KEY)
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.doOutput = true
-
-                // "eleven_multilingual_v2" model Hindi aur English dono bahut natural bolta hai
-                val jsonBody = """
-                    {
-                      "text": "$text",
-                      "model_id": "eleven_multilingual_v2",
-                      "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
-                      }
-                    }
-                """.trimIndent()
-
-                connection.outputStream.write(jsonBody.toByteArray(Charsets.UTF_8))
-
-                if (connection.responseCode == 200) {
-                    val inputStream = connection.inputStream
-                    val tempFile = File.createTempFile("butki_voice", ".mp3", cacheDir)
-                    val outputStream = FileOutputStream(tempFile)
-                    inputStream.copyTo(outputStream)
-                    outputStream.close()
-                    inputStream.close()
-
-                    withContext(Dispatchers.Main) {
-                        playAudioFile(tempFile.absolutePath)
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        txtResponse.text = "$text\n\n(Voice Error: ${connection.responseCode})"
-                        finishSpeaking()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    txtResponse.text = "$text\n\n(Internet/API Error)"
-                    finishSpeaking()
-                }
-            }
-        }
+        val params = Bundle()
+        params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "BUTKI_VOICE")
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "BUTKI_VOICE")
     }
 
-    private fun playAudioFile(filePath: String) {
-        try {
-            mediaPlayer?.release()
-            mediaPlayer = MediaPlayer().apply {
-                setDataSource(filePath)
-                prepare()
-                start()
-                setOnCompletionListener {
-                    finishSpeaking()
-                }
-            }
-        } catch (e: Exception) {
-            finishSpeaking()
-        }
-    }
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts.language = Locale("hi", "IN")
+            
+            tts.setPitch(1.3f) 
+            tts.setSpeechRate(0.9f)
 
-    private fun finishSpeaking() {
-        neonVisualizer.setMode(0)
-        neonVisualizer.updateVoiceLevel(1f)
-        isSpeaking = false
-        if (!isAskingNotificationPermission) {
-            isWaitingForWakeWord = true
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    isSpeaking = true
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    mainHandler.post {
+                        neonVisualizer.setMode(0)
+                        neonVisualizer.updateVoiceLevel(1f)
+                        isSpeaking = false
+                        if (!isAskingNotificationPermission) {
+                            isWaitingForWakeWord = true
+                            txtResponse.text = "● Waiting in background..."
+                        }
+                        restartListeningWithDelay(400)
+                    }
+                }
+
+                override fun onError(utteranceId: String?) {
+                    mainHandler.post {
+                        neonVisualizer.setMode(0)
+                        neonVisualizer.updateVoiceLevel(1f)
+                        isSpeaking = false
+                        if (!isAskingNotificationPermission) {
+                            isWaitingForWakeWord = true
+                        }
+                        restartListeningWithDelay(400)
+                    }
+                }
+            })
         }
-        restartListeningWithDelay(400)
     }
 
     override fun onDestroy() {
-        try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
+        try {
+            unregisterReceiver(notificationReceiver)
+        } catch (e: Exception) {}
+        
         mainHandler.removeCallbacksAndMessages(null)
         speechRecognizer?.destroy()
-        mediaPlayer?.release()
+        if (::tts.isInitialized) {
+            tts.stop()
+            tts.shutdown()
+        }
         super.onDestroy()
     }
 
