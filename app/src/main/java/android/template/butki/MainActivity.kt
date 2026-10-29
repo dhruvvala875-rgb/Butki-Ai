@@ -236,7 +236,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 if (spokenText.isNotEmpty()) {
                     if (isWaitingForWakeWord) {
-                        // Check if user said "butki" or "hey butki"
                         if (spokenText.contains("butki")) {
                             isWaitingForWakeWord = false
                             txtResponse.text = "Ji! Boliye, main sun rahi hoon..."
@@ -245,7 +244,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             restartListeningWithDelay(200)
                         }
                     } else {
-                        // Wake word already detected, now this is the actual prompt!
                         txtResponse.text = "Aap: \"$spokenText\""
                         askButki(spokenText)
                     }
@@ -305,9 +303,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val personaPrompt = "You are Butki, a sweet, caring, witty female AI companion. Reply in 1-2 short sentences in natural Hinglish/Hindi: $prompt"
+                // Sweet, Caring, Naughty GF Persona + Bilingual Auto-Detect Rule
+                val personaPrompt = """
+                    You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
+                    Language Rule: Detect the language of the user's input. If the user speaks in English, reply in natural, sweet English. If the user speaks in Hindi or Hinglish, reply in warm, conversational Hinglish/Hindi.
+                    Always reply in 1-2 short sentences. Keep the tone extremely affectionate, polite, and slightly teasing or naughty when appropriate.
+                    User's input: $prompt
+                """.trimIndent()
+
                 val response = generativeModel.generateContent(personaPrompt)
-                val answer = response.text?.replace("*", "") ?: "Kuch samajh nahi aaya."
+                val answer = response.text?.replace("*", "") ?: "Hmm? Kuch keh rahe the aap? Main toh aaphi ko soch rahi thi..."
 
                 withContext(Dispatchers.Main) {
                     txtResponse.text = answer
@@ -340,8 +345,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale("hi", "IN")
-            tts.setPitch(1.18f)
-            tts.setSpeechRate(1.02f)
+            // Sweet female voice tuning (Thoda higher pitch aur natural rate)
+            tts.setPitch(1.22f)
+            tts.setSpeechRate(1.0f)
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
@@ -353,7 +359,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.setMode(0)
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
-                        isWaitingForWakeWord = true // Wapas 'Hey Butki' ke wait par chala jayega!
+                        isWaitingForWakeWord = true 
                         restartListeningWithDelay(400)
                     }
                 }
