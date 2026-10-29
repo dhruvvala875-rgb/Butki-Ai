@@ -98,12 +98,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupFuturisticUI()
         tts = TextToSpeech(this, this)
 
-        val keyPart1 = "AQ.Ab8RN6"
-        val keyPart2 = "LxUmOiNNoF2b0O5guB6n5gz3vlGSwUcbJOcjT42KJzPA"
+        // ⚠️ BOSS YAHAN DHYAN DEIN: API KEY ⚠️
+        // Google AI Studio (aistudio.google.com) se apni ekdum nayi API key banaiye aur yahan daaliye.
+        // Agar key galat hui, toh Butki error message bolegi.
+        val keyPart1 = "AQ.Ab8RN6" // Isko hatakar apni real key daalein
+        val keyPart2 = "LxUmOiNNoF2b0O5guB6n5gz3vlGSwUcbJOcjT42KJzPA" 
         
         generativeModel = GenerativeModel(
             modelName = "gemini-1.5-flash",
-            apiKey = keyPart1 + keyPart2
+            apiKey = keyPart1 + keyPart2 // Pura API key in dono me merge hoga
         )
 
         try {
@@ -118,7 +121,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         checkPermissionsAndStart()
     }
 
-    // YAHAN NAYA FIX HAI: App me wapas aane par UI theek karne ke liye
     override fun onResume() {
         super.onResume()
         val cn = ComponentName(this, ButkiNotificationService::class.java)
@@ -471,12 +473,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
+                    // YAHAN AB BUTKI BOL KAR BATAYEGI KI KYA PROBLEM HAI
                     txtStatus.text = "● ERROR"
-                    txtResponse.text = "Network Error!"
-                    isSpeaking = false
-                    isWaitingForWakeWord = true
-                    neonVisualizer.setMode(0)
-                    restartListeningWithDelay(2000)
+                    txtResponse.text = "Network/API Error!"
+                    speakOut("Sorry Boss, lagta hai internet nahi chal raha, ya meri API key expire ho gayi hai.")
                 }
             }
         }
