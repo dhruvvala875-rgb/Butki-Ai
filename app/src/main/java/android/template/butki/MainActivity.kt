@@ -58,23 +58,32 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var savedSchedule: String = "Abhi tak koi schedule ya time table set nahi kiya hai aapne. Mujhe bataiye, main yaad rakh lungi!"
     private var savedTasks: MutableList<String> = mutableListOf()
 
+    // Smart Notification & Reply States
     private var isAskingNotificationPermission = false
+    private var isAskingToReply = false
+    private var isWaitingForReplyText = false
     private var pendingNotificationTitle = ""
     private var pendingNotificationText = ""
+    private var canReplyToCurrentNotification = false
 
     private val notificationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "butki.NEW_NOTIFICATION") {
                 val title = intent.getStringExtra("title") ?: ""
                 val text = intent.getStringExtra("text") ?: ""
+                val canReply = intent.getBooleanExtra("canReply", false)
                 
                 if (title.isNotEmpty() && text.isNotEmpty() && !isSpeaking) {
                     pendingNotificationTitle = title
                     pendingNotificationText = text
+                    canReplyToCurrentNotification = canReply
+                    
                     isAskingNotificationPermission = true
+                    isAskingToReply = false
+                    isWaitingForReplyText = false
                     isWaitingForWakeWord = false
                     
-                    val promptText = "Boss, $title ki taraf se ek notification aaya hai. Kya main padh ke sunau?"
+                    val promptText = "Boss, $title ki taraf se ek message aaya hai. Kya main padh ke sunau?"
                     txtResponse.text = "● Notification Detected..."
                     speakOut(promptText)
                 }
@@ -236,12 +245,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
-        // Ultra-sensitive Intent setup
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH) // Zyada fast aur accurate
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5) // Google ke 5 guesses mangenge
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500) 
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500)
         }
@@ -249,7 +257,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 if (!isSpeaking) {
-                    if (isAskingNotificationPermission) {
+                    if (isAskingNotificationPermission || isAskingToReply || isWaitingForReplyText) {
                         txtStatus.text = "● WAITING FOR YOUR ANSWER..."
                     } else if (isWaitingForWakeWord) {
                         txtStatus.text = "● WAITING FOR 'HEY BUTKI'..."
@@ -261,7 +269,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             override fun onBeginningOfSpeech() {
-                if (isWaitingForWakeWord && !isAskingNotificationPermission) {
+                if (isWaitingForWakeWord && !isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
                     txtStatus.text = "● LISTENING..."
                 } else {
                     txtStatus.text = "● RECEIVING COMMAND..."
@@ -292,32 +300,69 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 var spokenText = ""
                 var containsButki = false
 
-                // Saare guesses mein check karenge Butki ka naam
                 matches?.forEach { match ->
                     val text = match.lowercase()
-                    if (spokenText.isEmpty()) spokenText = text // Best guess ko save kar lenge
-                    
+                    if (spokenText.isEmpty()) spokenText = text 
                     if (text.contains("butki") || text.contains("bootki") || text.contains("bhootki") || text.contains("bhutki") || text.contains("chutki") || text.contains("putki") || text.contains("boot ki") || text.contains("hutki") || text.contains("book ki")) {
                         containsButki = true
                     }
                 }
 
                 if (spokenText.isNotEmpty()) {
+                    
+                    // State 1: Padhne ki permission
                     if (isAskingNotificationPermission) {
                         if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("padh") || spokenText.contains("sunao") || spokenText.contains("thik hai")) {
                             isAskingNotificationPermission = false
-                            isWaitingForWakeWord = true
-                            val msg = "Theek hai Boss. Message hai: $pendingNotificationText"
-                            txtResponse.text = "● Reading message aloud..."
-                            speakOut(msg)
+                            
+                            if (canReplyToCurrentNotification) {
+                                isAskingToReply = true
+                                val msg = "Message hai: $pendingNotificationText. Kya iska reply karna hai Boss?"
+                                txtResponse.text = "● Asking for reply permission..."
+                                speakOut(msg)
+                            } else {
+                                isWaitingForWakeWord = true
+                                val msg = "Message hai: $pendingNotificationText."
+                                txtResponse.text = "● Reading notification..."
+                                speakOut(msg)
+                            }
                         } else if (spokenText.contains("nahi") || spokenText.contains("no") || spokenText.contains("mat") || spokenText.contains("rehne")) {
                             isAskingNotificationPermission = false
                             isWaitingForWakeWord = true
-                            val msg = "Theek hai Boss, main ise ignore kar rahi hoon."
                             txtResponse.text = "● Ignored notification."
-                            speakOut(msg)
+                            speakOut("Theek hai Boss, main ise ignore kar rahi hoon.")
                         }
-                    } else if (isWaitingForWakeWord) {
+                    } 
+                    // State 2: Reply karne ki permission
+                    else if (isAskingToReply) {
+                        if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("karo") || spokenText.contains("bhej")) {
+                            isAskingToReply = false
+                            isWaitingForReplyText = true
+                            txtResponse.text = "● Waiting for reply text..."
+                            speakOut("Bataiye Boss, kya reply bhejna hai?")
+                        } else {
+                            isAskingToReply = false
+                            isWaitingForWakeWord = true
+                            txtResponse.text = "● Reply cancelled."
+                            speakOut("Theek hai Boss, main koi reply nahi bhej rahi.")
+                        }
+                    }
+                    // State 3: Reply Message Sunna aur Bhejna
+                    else if (isWaitingForReplyText) {
+                        isWaitingForReplyText = false
+                        isWaitingForWakeWord = true
+                        
+                        txtResponse.text = "● Sending Reply..."
+                        val success = ButkiNotificationService.sendReply(this@MainActivity, spokenText)
+                        
+                        if (success) {
+                            speakOut("Message bhej diya Boss!")
+                        } else {
+                            speakOut("Sorry Boss, lagta hai yeh app direct reply support nahi karti.")
+                        }
+                    } 
+                    // State 4: Normal AI Chat (Wake Word)
+                    else if (isWaitingForWakeWord) {
                         if (containsButki) {
                             isWaitingForWakeWord = false
                             txtResponse.text = "● Awake. Listening to you..."
@@ -325,7 +370,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         } else {
                             restartListeningWithDelay(300)
                         }
-                    } else {
+                    } 
+                    // State 5: Gemini AI prompt
+                    else {
                         txtResponse.text = "Aapne kaha: \"$spokenText\""
                         askButki(spokenText)
                     }
@@ -345,7 +392,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
 
-                if (!isSpeaking && !isAskingNotificationPermission && isWaitingForWakeWord) {
+                if (!isSpeaking && !isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText && isWaitingForWakeWord) {
                     if (containsButki) {
                         speechRecognizer?.stopListening()
                         isWaitingForWakeWord = false
@@ -364,7 +411,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun startListeningLoop() {
         if (!isSpeaking) {
             try {
-                // Bina kisi delay ya mute ke direct start karenge
                 speechRecognizer?.startListening(recognizerIntent)
             } catch (e: Exception) {
                 restartListeningWithDelay(500)
@@ -459,11 +505,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.setMode(0)
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
-                        if (!isAskingNotificationPermission) {
+                        
+                        // Check karenge ki Butki aapse agla sawal toh nahi puchne wali
+                        if (!isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
                             isWaitingForWakeWord = true
                             txtResponse.text = "● Waiting in background..."
                         }
-                        restartListeningWithDelay(200) // Jaldi wapas sunne ke liye
+                        restartListeningWithDelay(200)
                     }
                 }
 
@@ -472,7 +520,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.setMode(0)
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
-                        if (!isAskingNotificationPermission) {
+                        if (!isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
                             isWaitingForWakeWord = true
                         }
                         restartListeningWithDelay(200)
