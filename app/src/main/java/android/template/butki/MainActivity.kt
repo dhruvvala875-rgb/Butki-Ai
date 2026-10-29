@@ -98,13 +98,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupFuturisticUI()
         tts = TextToSpeech(this, this)
 
-        // API KEY YAHAN DALEIN
-        val keyPart1 = "AQ.Ab8RN6" 
-        val keyPart2 = "LxUmOiNNoF2b0O5guB6n5gz3vlGSwUcbJOcjT42KJzPA" 
+        // Boss ki Real API Key
+        val apiKey = "AQ.Ab8RN6LizFaCEnG7qeQlYFUOjhNYIwHPCP8i2lqcRw25i2mHxw"
         
         generativeModel = GenerativeModel(
             modelName = "gemini-1.5-flash",
-            apiKey = keyPart1 + keyPart2 
+            apiKey = apiKey 
         )
 
         try {
@@ -256,7 +255,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
-        // Boss, yahan se wo 2.5 second wala delay hata diya hai taaki turant sune.
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
@@ -301,7 +299,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onError(error: Int) {
                 neonVisualizer.updateVoiceLevel(1f)
                 if (!isSpeaking) {
-                    // Agar error aaye (jaise aawaz na samajh aaye) toh turant restart
                     restartListeningWithDelay(100)
                 }
             }
@@ -399,7 +396,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     }
                 }
 
-                // Yahan screen par live typing dikhegi taaki pata chale Butki kya sun rahi hai
                 if (currentText.isNotEmpty() && !isSpeaking) {
                     txtResponse.text = "Sun rahi hoon: \"$currentText...\""
                 }
@@ -450,197 +446,4 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (lowerPrompt.contains("save") || lowerPrompt.contains("mera") || lowerPrompt.contains("hai")) {
                 savedSchedule = prompt
             }
-        } else if (lowerPrompt.contains("task") || lowerPrompt.contains("kaam")) {
-            savedTasks.add(prompt)
-        }
-
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val personaPrompt = """
-                    You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
-                    CRITICAL RULE 1: You must ALWAYS address the user as "Boss" in a sweet, affectionate, and respectful way. 
-                    CRITICAL RULE 2: NEVER use emojis, asterisks, hashtags, or special characters. Produce purely spoken-word text because it will be spoken by a voice engine.
-                    CRITICAL RULE 3: You perfectly understand both Hindi and English. If the user speaks English, reply in English. If they speak Hindi/Hinglish, reply in conversational Hindi/Hinglish.
-                    CRITICAL RULE 4: Keep responses short (1-2 sentences) and natural for a voice conversation.
-                    
-                    User's Saved Schedule: "$savedSchedule"
-                    User's Saved Tasks: "$savedTasks"
-                    
-                    User's input: $prompt
-                """.trimIndent()
-
-                val response = generativeModel.generateContent(personaPrompt)
-                val answer = response.text?.replace(Regex("[*#~]"), "") ?: "Hmm? Kuch samajh nahi aaya Boss, phir se bataiye na..."
-
-                withContext(Dispatchers.Main) {
-                    txtResponse.text = "● Speaking..."
-                    speakOut(answer)
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    txtStatus.text = "● ERROR"
-                    txtResponse.text = "Network/API Error!"
-                    speakOut("Sorry Boss, lagta hai internet nahi chal raha, ya meri API key expire ho gayi hai.")
-                }
-            }
-        }
-    }
-
-    private fun speakOut(text: String) {
-        isSpeaking = true
-        txtStatus.text = "● BUTKI IS SPEAKING..."
-        neonVisualizer.setMode(2)
-        neonVisualizer.updateVoiceLevel(8f)
-
-        val params = Bundle()
-        params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "BUTKI_VOICE")
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "BUTKI_VOICE")
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("hi", "IN")
-            
-            tts.setPitch(1.3f) 
-            tts.setSpeechRate(0.9f)
-
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {
-                    isSpeaking = true
-                }
-
-                override fun onDone(utteranceId: String?) {
-                    mainHandler.post {
-                        neonVisualizer.setMode(0)
-                        neonVisualizer.updateVoiceLevel(1f)
-                        isSpeaking = false
-                        
-                        if (!isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
-                            isWaitingForWakeWord = true
-                            txtResponse.text = "● Waiting in background..."
-                        }
-                        restartListeningWithDelay(200)
-                    }
-                }
-
-                override fun onError(utteranceId: String?) {
-                    mainHandler.post {
-                        neonVisualizer.setMode(0)
-                        neonVisualizer.updateVoiceLevel(1f)
-                        isSpeaking = false
-                        if (!isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
-                            isWaitingForWakeWord = true
-                        }
-                        restartListeningWithDelay(200)
-                    }
-                }
-            })
-        }
-    }
-
-    override fun onDestroy() {
-        try {
-            unregisterReceiver(notificationReceiver)
-        } catch (e: Exception) {}
-        
-        mainHandler.removeCallbacksAndMessages(null)
-        speechRecognizer?.destroy()
-        if (::tts.isInitialized) {
-            tts.stop()
-            tts.shutdown()
-        }
-        super.onDestroy()
-    }
-
-    class NeonOrbView(context: Context) : View(context) {
-        private val cyanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 6f
-            color = Color.parseColor("#00F0FF")
-            setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
-        }
-        private val pinkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 8f
-            color = Color.parseColor("#FF007F")
-            setShadowLayer(30f, 0f, 0f, Color.parseColor("#FF007F"))
-        }
-        private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = Color.parseColor("#1800F0FF")
-        }
-        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 110f
-            typeface = Typeface.DEFAULT_BOLD
-            textAlign = Paint.Align.CENTER
-            setShadowLayer(30f, 0f, 0f, Color.parseColor("#FF007F"))
-        }
-
-        private var angle = 0f
-        private var voicePulse = 1f
-        private var mode = 0
-        private val rect = RectF()
-
-        init {
-            setLayerType(LAYER_TYPE_SOFTWARE, null)
-            ValueAnimator.ofFloat(0f, 360f).apply {
-                duration = 3500
-                repeatCount = ValueAnimator.INFINITE
-                interpolator = LinearInterpolator()
-                addUpdateListener {
-                    angle = it.animatedValue as Float
-                    if (mode == 2) {
-                        voicePulse = 4f + 5f * sin(Math.toRadians(angle.toDouble() * 4)).toFloat()
-                    }
-                    invalidate()
-                }
-                start()
-            }
-        }
-
-        fun updateVoiceLevel(rms: Float) {
-            voicePulse = rms.coerceIn(0.5f, 12f)
-            invalidate()
-        }
-
-        fun setMode(newMode: Int) {
-            mode = newMode
-            invalidate()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val cx = width / 2f
-            val cy = height / 2f
-            val baseR = (width.coerceAtMost(height) / 3.2f) + (voicePulse * 8f)
-
-            canvas.drawCircle(cx, cy, baseR * 0.72f, corePaint)
-
-            rect.set(cx - baseR, cy - baseR, cx + baseR, cy + baseR)
-            canvas.drawArc(rect, angle, 75f, false, cyanPaint)
-            canvas.drawArc(rect, angle + 120f, 75f, false, cyanPaint)
-            canvas.drawArc(rect, angle + 240f, 75f, false, cyanPaint)
-
-            val r2 = baseR * 0.84f
-            rect.set(cx - r2, cy - r2, cx + r2, cy + r2)
-            canvas.drawArc(rect, -angle * 1.4f, 110f, false, pinkPaint)
-            canvas.drawArc(rect, -angle * 1.4f + 180f, 110f, false, pinkPaint)
-
-            for (i in 0 until 24) {
-                val rad = Math.toRadians((i * 15 + angle).toDouble())
-                val inner = baseR * 1.06f
-                val waveLen = (voicePulse * 6f) * kotlin.math.abs(sin(rad * 3)).toFloat() + 12f
-                val outer = inner + waveLen
-                val sx = cx + inner * cos(rad).toFloat()
-                val sy = cy + inner * sin(rad).toFloat()
-                val ex = cx + outer * cos(rad).toFloat()
-                val ey = cy + outer * sin(rad).toFloat()
-                canvas.drawLine(sx, sy, ex, ey, if (i % 2 == 0) cyanPaint else pinkPaint)
-            }
-
-            val textY = cy - ((textPaint.descent() + textPaint.ascent()) / 2)
-            canvas.drawText("B", cx, textY, textPaint)
-        }
-    }
-}
+        } else if (lowerPrompt.contains("task") || lowerPrompt.contains
