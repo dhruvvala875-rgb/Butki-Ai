@@ -10,7 +10,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
-import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -46,7 +45,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var recognizerIntent: Intent
     private lateinit var generativeModel: GenerativeModel
-    private lateinit var audioManager: AudioManager
 
     private lateinit var txtResponse: TextView
     private lateinit var txtStatus: TextView
@@ -90,8 +88,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         window.statusBarColor = Color.parseColor("#05050A")
 
         setupFuturisticUI()
-        
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         tts = TextToSpeech(this, this)
 
         val keyPart1 = "AQ.Ab8RN6"
@@ -150,7 +146,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtStatus = TextView(this).apply {
-            text = "● WAITING FOR 'HEY BUTKI'..."
+            text = "● SYSTEM BOOTING..."
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#FF007F"))
@@ -240,12 +236,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
+        // Ultra-sensitive Intent setup
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH) // Zyada fast aur accurate
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500) 
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5) // Google ke 5 guesses mangenge
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500) 
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -285,24 +283,26 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onError(error: Int) {
                 neonVisualizer.updateVoiceLevel(1f)
                 if (!isSpeaking) {
-                    restartListeningWithDelay(400)
+                    restartListeningWithDelay(200)
                 }
             }
 
             override fun onResults(results: Bundle?) {
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val spokenText = matches?.firstOrNull()?.lowercase() ?: ""
+                var spokenText = ""
+                var containsButki = false
+
+                // Saare guesses mein check karenge Butki ka naam
+                matches?.forEach { match ->
+                    val text = match.lowercase()
+                    if (spokenText.isEmpty()) spokenText = text // Best guess ko save kar lenge
+                    
+                    if (text.contains("butki") || text.contains("bootki") || text.contains("bhootki") || text.contains("bhutki") || text.contains("chutki") || text.contains("putki") || text.contains("boot ki") || text.contains("hutki") || text.contains("book ki")) {
+                        containsButki = true
+                    }
+                }
 
                 if (spokenText.isNotEmpty()) {
-                    val containsButki = spokenText.contains("butki") || 
-                                        spokenText.contains("bootki") || 
-                                        spokenText.contains("bhootki") || 
-                                        spokenText.contains("bhutki") || 
-                                        spokenText.contains("chutki") || 
-                                        spokenText.contains("putki") || 
-                                        spokenText.contains("boot ki") || 
-                                        spokenText.contains("hutki")
-
                     if (isAskingNotificationPermission) {
                         if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("padh") || spokenText.contains("sunao") || spokenText.contains("thik hai")) {
                             isAskingNotificationPermission = false
@@ -323,10 +323,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             txtResponse.text = "● Awake. Listening to you..."
                             speakOut("Haan boliye Boss, main sun rahi hoon!")
                         } else {
-                            restartListeningWithDelay(500)
+                            restartListeningWithDelay(300)
                         }
                     } else {
-                        txtResponse.text = "Aap: \"$spokenText\""
+                        txtResponse.text = "Aapne kaha: \"$spokenText\""
                         askButki(spokenText)
                     }
                 } else {
@@ -336,27 +336,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             override fun onPartialResults(partialResults: Bundle?) {
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val partialText = matches?.firstOrNull()?.lowercase() ?: ""
+                var containsButki = false
                 
-                if (partialText.isNotEmpty() && !isSpeaking) {
-                    val containsButki = partialText.contains("butki") || 
-                                        partialText.contains("bootki") || 
-                                        partialText.contains("bhootki") || 
-                                        partialText.contains("bhutki") || 
-                                        partialText.contains("chutki") || 
-                                        partialText.contains("putki") || 
-                                        partialText.contains("boot ki") || 
-                                        partialText.contains("hutki")
+                matches?.forEach { match ->
+                    val text = match.lowercase()
+                    if (text.contains("butki") || text.contains("bootki") || text.contains("bhootki") || text.contains("bhutki") || text.contains("chutki") || text.contains("putki") || text.contains("boot ki") || text.contains("hutki") || text.contains("book ki")) {
+                        containsButki = true
+                    }
+                }
 
-                    if (!isAskingNotificationPermission && isWaitingForWakeWord) {
-                        if (containsButki) {
-                            speechRecognizer?.stopListening()
-                            isWaitingForWakeWord = false
-                            txtResponse.text = "● Awake. Listening to you..."
-                            speakOut("Haan boliye Boss!")
-                        }
-                    } else {
-                        txtResponse.text = "Sun rahi hoon: \"$partialText...\""
+                if (!isSpeaking && !isAskingNotificationPermission && isWaitingForWakeWord) {
+                    if (containsButki) {
+                        speechRecognizer?.stopListening()
+                        isWaitingForWakeWord = false
+                        txtResponse.text = "● Awake. Listening to you..."
+                        speakOut("Haan boliye Boss!")
                     }
                 }
             }
@@ -370,9 +364,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun startListeningLoop() {
         if (!isSpeaking) {
             try {
+                // Bina kisi delay ya mute ke direct start karenge
                 speechRecognizer?.startListening(recognizerIntent)
             } catch (e: Exception) {
-                restartListeningWithDelay(800)
+                restartListeningWithDelay(500)
             }
         }
     }
@@ -420,7 +415,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val answer = response.text?.replace(Regex("[*#~]"), "") ?: "Hmm? Kuch samajh nahi aaya Boss, phir se bataiye na..."
 
                 withContext(Dispatchers.Main) {
-                    // Screen par text nahi dikhega, Butki sirf bolegi
                     txtResponse.text = "● Speaking..."
                     speakOut(answer)
                 }
@@ -469,7 +463,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             isWaitingForWakeWord = true
                             txtResponse.text = "● Waiting in background..."
                         }
-                        restartListeningWithDelay(400)
+                        restartListeningWithDelay(200) // Jaldi wapas sunne ke liye
                     }
                 }
 
@@ -481,7 +475,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (!isAskingNotificationPermission) {
                             isWaitingForWakeWord = true
                         }
-                        restartListeningWithDelay(400)
+                        restartListeningWithDelay(200)
                     }
                 }
             })
