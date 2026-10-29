@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var recognizerIntent: Intent
-    private var generativeModel: GenerativeModel? = null // Ab yeh baad mein setup hoga
+    private var generativeModel: GenerativeModel? = null 
     private lateinit var sharedPreferences: SharedPreferences
 
     private lateinit var txtResponse: TextView
@@ -112,7 +112,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } catch (ex: Exception) { }
         }
 
-        // Yahan Check Karenge ki API Key pehle se save hai ya nahi
         val savedKey = sharedPreferences.getString("GEMINI_API_KEY", "")
         if (savedKey.isNullOrEmpty()) {
             showApiKeyDialog()
@@ -123,7 +122,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // 🔴 NAYA FUNCTION: MANUAL API KEY POPUP DIALOG 🔴
     private fun showApiKeyDialog() {
         val input = EditText(this)
         input.hint = "Paste Gemini API Key here"
@@ -137,13 +135,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .setPositiveButton("Save & Start") { _, _ ->
                 val key = input.text.toString().trim()
                 if (key.isNotEmpty()) {
-                    // Key save kar lo
                     sharedPreferences.edit().putString("GEMINI_API_KEY", key).apply()
                     setupGeminiAI(key)
                     checkNotificationPermission()
                     checkPermissionsAndStart()
                 } else {
-                    showApiKeyDialog() // Agar khali chhoda toh wapas pucho
+                    showApiKeyDialog() 
                 }
             }
             .show()
@@ -202,7 +199,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
             gravity = Gravity.CENTER
             
-            // SECRET TRICK: Title par long press karke API key reset kar sakte hain
             setOnLongClickListener {
                 sharedPreferences.edit().remove("GEMINI_API_KEY").apply()
                 showApiKeyDialog()
@@ -287,25 +283,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            setupContinuousSpeechRecognizer()
-        } else {
-            txtStatus.text = "● MIC PERMISSION DENIED"
-            txtResponse.text = "Microphone permission allow karein."
-        }
-    }
-
     private fun setupContinuousSpeechRecognizer() {
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
+        // YAHAN FIX HAI: Ab mic aapki aawaz ke beech me thoda (1.5s) wait karega, turant restart nahi hoga
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500) 
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -345,7 +334,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onError(error: Int) {
                 neonVisualizer.updateVoiceLevel(1f)
                 if (!isSpeaking) {
-                    restartListeningWithDelay(100)
+                    // YAHAN FIX HAI: Lagatar beep loop rokne ke liye Smart Delay
+                    val delayTime = if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        600L // Agar shanti hai toh thodi der wait karke restart karo
+                    } else {
+                        200L
+                    }
+                    restartListeningWithDelay(delayTime)
                 }
             }
 
@@ -417,7 +412,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             txtResponse.text = "● Awake. Listening to you..."
                             speakOut("Haan boliye Boss, main sun rahi hoon!")
                         } else {
-                            restartListeningWithDelay(300)
+                            restartListeningWithDelay(400)
                         }
                     } 
                     else {
@@ -425,7 +420,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         askButki(spokenText)
                     }
                 } else {
-                    restartListeningWithDelay(300)
+                    restartListeningWithDelay(400)
                 }
             }
 
@@ -467,7 +462,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 speechRecognizer?.startListening(recognizerIntent)
             } catch (e: Exception) {
-                restartListeningWithDelay(200)
+                restartListeningWithDelay(400)
             }
         }
     }
@@ -568,7 +563,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             isWaitingForWakeWord = true
                             txtResponse.text = "● Waiting in background..."
                         }
-                        restartListeningWithDelay(200)
+                        restartListeningWithDelay(400)
                     }
                 }
 
@@ -580,7 +575,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (!isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
                             isWaitingForWakeWord = true
                         }
-                        restartListeningWithDelay(200)
+                        restartListeningWithDelay(400)
                     }
                 }
             })
