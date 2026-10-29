@@ -98,15 +98,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setupFuturisticUI()
         tts = TextToSpeech(this, this)
 
-        // ⚠️ BOSS YAHAN DHYAN DEIN: API KEY ⚠️
-        // Google AI Studio (aistudio.google.com) se apni ekdum nayi API key banaiye aur yahan daaliye.
-        // Agar key galat hui, toh Butki error message bolegi.
-        val keyPart1 = "AQ.Ab8RN6" // Isko hatakar apni real key daalein
+        // API KEY YAHAN DALEIN
+        val keyPart1 = "AQ.Ab8RN6" 
         val keyPart2 = "LxUmOiNNoF2b0O5guB6n5gz3vlGSwUcbJOcjT42KJzPA" 
         
         generativeModel = GenerativeModel(
             modelName = "gemini-1.5-flash",
-            apiKey = keyPart1 + keyPart2 // Pura API key in dono me merge hoga
+            apiKey = keyPart1 + keyPart2 
         )
 
         try {
@@ -128,7 +126,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val enabled = flat != null && flat.contains(cn.flattenToString())
         
         if (enabled && ::txtResponse.isInitialized && txtResponse.text.toString().contains("allow kijiye")) {
-            txtResponse.text = "● Permission Granted! System Ready. Boliye: \"Hey Butki\""
+            txtResponse.text = "● System Ready. Boliye: \"Hey Butki\""
         }
     }
 
@@ -258,13 +256,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
+        // Boss, yahan se wo 2.5 second wala delay hata diya hai taaki turant sune.
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500) 
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -304,7 +301,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onError(error: Int) {
                 neonVisualizer.updateVoiceLevel(1f)
                 if (!isSpeaking) {
-                    restartListeningWithDelay(200)
+                    // Agar error aaye (jaise aawaz na samajh aaye) toh turant restart
+                    restartListeningWithDelay(100)
                 }
             }
 
@@ -391,12 +389,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onPartialResults(partialResults: Bundle?) {
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 var containsButki = false
+                var currentText = ""
                 
                 matches?.forEach { match ->
                     val text = match.lowercase()
+                    if (currentText.isEmpty()) currentText = text
                     if (text.contains("butki") || text.contains("bootki") || text.contains("bhootki") || text.contains("bhutki") || text.contains("chutki") || text.contains("putki") || text.contains("boot ki") || text.contains("hutki") || text.contains("book ki")) {
                         containsButki = true
                     }
+                }
+
+                // Yahan screen par live typing dikhegi taaki pata chale Butki kya sun rahi hai
+                if (currentText.isNotEmpty() && !isSpeaking) {
+                    txtResponse.text = "Sun rahi hoon: \"$currentText...\""
                 }
 
                 if (!isSpeaking && !isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText && isWaitingForWakeWord) {
@@ -420,7 +425,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 speechRecognizer?.startListening(recognizerIntent)
             } catch (e: Exception) {
-                restartListeningWithDelay(500)
+                restartListeningWithDelay(200)
             }
         }
     }
@@ -473,7 +478,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    // YAHAN AB BUTKI BOL KAR BATAYEGI KI KYA PROBLEM HAI
                     txtStatus.text = "● ERROR"
                     txtResponse.text = "Network/API Error!"
                     speakOut("Sorry Boss, lagta hai internet nahi chal raha, ya meri API key expire ho gayi hai.")
