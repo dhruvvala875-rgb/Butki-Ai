@@ -1,43 +1,50 @@
 
-override fun onError(error: Int) {
-    neonVisualizer.updateVoiceLevel(1f)
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-        txtStatus.text = "● MIC PERMISSION DENIED"
-        txtResponse.text =
-            "Microphone permission allow karein: Settings > Apps > Butki AI > Permissions."
-        return
-    }
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    if (isSpeaking || isFinishing || isDestroyed) return
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
 
-    when (error) {
-        SpeechRecognizer.ERROR_NO_MATCH,
-        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-            txtStatus.text = "● LISTENING FOR HEY BUTKI..."
-            restartListeningWithDelay(700)
-        }
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-        SpeechRecognizer.ERROR_CLIENT,
-        SpeechRecognizer.ERROR_SERVER -> {
-            txtStatus.text = "● RESTARTING MICROPHONE..."
-            txtResponse.text =
-                "Voice service restart ho rahi hai. Kripya ek second rukiye."
+    <application
+        android:allowBackup="true"
+        android:label="Butki AI"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.NoActionBar">
 
-            mainHandler.removeCallbacksAndMessages(null)
-            mainHandler.postDelayed({
-                if (!isFinishing && !isDestroyed && !isSpeaking) {
-                    setupContinuousSpeechRecognizer()
-                }
-            }, 1200)
-        }
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
-        else -> {
-            txtStatus.text = "● SPEECH ERROR: $error"
-            txtResponse.text =
-                "Voice recognition mein problem hai. B par tap karke dobara boliye."
-            restartListeningWithDelay(1500)
-        }
-    }
-}
+        <service
+            android:name=".ButkiNotificationService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>
