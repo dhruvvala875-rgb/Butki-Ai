@@ -1,14 +1,10 @@
-
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <uses-feature
-        android:name="android.hardware.microphone"
-        android:required="false" />
-
+    <!-- 🔴 ANDROID 11+ KE LIYE SABSE ZAROORI PERMISSION (Iske bina mic on nahi hota) 🔴 -->
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
@@ -26,7 +22,7 @@
         android:label="Butki AI"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
-
+        
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -36,6 +32,7 @@
             </intent-filter>
         </activity>
 
+        <!-- Notification Padhne aur Reply Karne Wali Service -->
         <service
             android:name=".ButkiNotificationService"
             android:exported="true"
