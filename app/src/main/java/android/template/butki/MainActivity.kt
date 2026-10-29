@@ -287,14 +287,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
-        // YAHAN FIX HAI: Ab mic aapki aawaz ke beech me thoda (1.5s) wait karega, turant restart nahi hoga
+        // 🔴 YAHAN FIX HAI: Zyada fast aur dual-language support (Hindi + English)
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+            putExtra(RecognizerIntent.EXTRA_SUPPORTED_LANGUAGES, arrayOf("hi-IN", "en-IN"))
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500) 
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -334,9 +333,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun onError(error: Int) {
                 neonVisualizer.updateVoiceLevel(1f)
                 if (!isSpeaking) {
-                    // YAHAN FIX HAI: Lagatar beep loop rokne ke liye Smart Delay
                     val delayTime = if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                        600L // Agar shanti hai toh thodi der wait karke restart karo
+                        500L
                     } else {
                         200L
                     }
