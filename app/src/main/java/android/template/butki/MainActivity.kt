@@ -40,6 +40,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.io.IOException
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.cos
@@ -58,6 +63,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSpeaking = false
+    private val httpClient = OkHttpClient()
 
     private var savedSchedule: String = "Abhi tak koi schedule set nahi kiya hai aapne."
     private var savedTasks: MutableList<String> = mutableListOf()
@@ -115,44 +121,124 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
         }
 
-        val savedKey = sharedPreferences.getString("GEMINI_API_KEY", "")
-        if (savedKey.isNullOrEmpty()) {
-            showApiKeyDialog()
+        val savedGeminiKey = sharedPreferences.getString("GEMINI_API_KEY", "")
+        if (savedGeminiKey.isNullOrEmpty()) {
+            showGeminiApiKeyDialog()
         } else {
-            setupGeminiAI(savedKey)
-            checkNotificationPermission()
+            setupGeminiAI(savedGeminiKey)
+            checkTinyFishKey()
         }
     }
 
-    private fun showApiKeyDialog() {
-        val input = EditText(this)
-        input.hint = "Paste Gemini API Key here"
-        input.setPadding(40, 40, 40, 40)
+    // 🔴 MANUAL GEMINI API KEY DIALOG
+    private fun showGeminiApiKeyDialog() {
+        val input = EditText(this).apply {
+            hint = "Paste Gemini API Key here"
+            setPadding(40, 40, 40, 40)
+        }
 
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Setup Butki AI")
-            .setMessage("Boss, please enter your Gemini API Key to activate my brain!")
+            .setTitle("Setup Gemini AI")
+            .setMessage("Boss, please enter your Gemini API Key:")
             .setView(input)
             .setCancelable(false)
-            .setPositiveButton("Save & Start") { _, _ ->
+            .setPositiveButton("Save") { _, _ ->
                 val key = input.text.toString().trim()
                 if (key.isNotEmpty()) {
                     sharedPreferences.edit().putString("GEMINI_API_KEY", key).apply()
                     setupGeminiAI(key)
-                    checkNotificationPermission()
+                    checkTinyFishKey()
                 } else {
-                    showApiKeyDialog() 
+                    showGeminiApiKeyDialog() 
                 }
             }
             .show()
     }
 
-    // 🔴 FORCED TO USE GEMINI-3.8-FLASH AS REQUESTED BY GOOGLE API
+    // 🔴 MANUAL TINYFISH API KEY DIALOG
+    private fun checkTinyFishKey() {
+        val savedTinyKey = sharedPreferences.getString("TINYFISH_API_KEY", "")
+        if (savedTinyKey.isNullOrEmpty()) {
+            val input = EditText(this).apply {
+                hint = "Paste TinyFish API Key here"
+                setPadding(40, 40, 40, 40)
+            }
+
+            AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Setup TinyFish Agent")
+                .setMessage("Boss, please enter your TinyFish API Key for web tasks:")
+                .setView(input)
+                .setCancelable(false)
+                .setPositiveButton("Save & Start") { _, _ ->
+                    val key = input.text.toString().trim()
+                    if (key.isNotEmpty()) {
+                        sharedPreferences.edit().putString("TINYFISH_API_KEY", key).apply()
+                        checkNotificationPermission()
+                    } else {
+                        checkTinyFishKey()
+                    }
+                }
+                .show()
+        } else {
+            checkNotificationPermission()
+        }
+    }
+
     private fun setupGeminiAI(apiKey: String) {
         generativeModel = GenerativeModel(
             modelName = "gemini-3.8-flash",
             apiKey = apiKey.trim() 
         )
+    }
+
+    // 🔴 TINYFISH WEB AGENT INTEGRATION (USING SAVED MANUAL KEY)
+    private fun callTinyFishAgent(targetUrl: String, userGoal: String) {
+        val tinyFishApiKey = sharedPreferences.getString("TINYFISH_API_KEY", "") ?: ""
+        if (tinyFishApiKey.isEmpty()) {
+            checkTinyFishKey()
+            return
+        }
+
+        val url = "https://agent.tinyfish.ai/v1/automate"
+        val jsonBody = JSONObject().apply {
+            put("url", targetUrl)
+            put("goal", userGoal)
+        }
+
+        val body = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("X-API-Key", tinyFishApiKey)
+            .addHeader("Content-Type", "application/json")
+            .post(body)
+            .build()
+
+        isSpeaking = true
+        txtStatus.text = "● TINYFISH WORKING..."
+        neonVisualizer.setMode(1)
+
+        httpClient.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                mainHandler.post {
+                    txtResponse.text = "❌ TinyFish Connection Failed: ${e.localizedMessage}"
+                    speakOut("Sorry Boss, TinyFish se connect nahi ho paya.")
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseData = response.body?.string()
+                mainHandler.post {
+                    if (response.isSuccessful && responseData != null) {
+                        txtResponse.text = "✅ TinyFish Result:\n$responseData"
+                        speakOut("Boss, TinyFish ne web data nikal liya hai.")
+                    } else {
+                        txtResponse.text = "❌ TinyFish Error: ${response.code}"
+                        speakOut("Boss, TinyFish task mein error aa gaya.")
+                    }
+                }
+            }
+        })
     }
 
     private fun checkNotificationPermission() {
@@ -189,9 +275,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
             gravity = Gravity.CENTER
             
+            // 🔴 Long-press on title to re-enter keys manually anytime
             setOnLongClickListener {
-                sharedPreferences.edit().remove("GEMINI_API_KEY").apply()
-                showApiKeyDialog()
+                sharedPreferences.edit().clear().apply()
+                showGeminiApiKeyDialog()
                 true
             }
         }
@@ -390,6 +477,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 speakOut("Sorry Boss, reply nahi ja saka.")
             }
         } 
+        else if (spokenText.contains("search web") || spokenText.contains("web search") || spokenText.contains("extract")) {
+            txtResponse.text = "TinyFish web agent task shuru kar rahi hai..."
+            speakOut("Theek hai Boss, web se data nikal rahi hoon.")
+            callTinyFishAgent("https://google.com", spokenText)
+        }
         else {
             txtResponse.text = "Boss: \"$spokenText\"\nButki soch rahi hai..."
             askButki(spokenText)
@@ -455,6 +547,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onInit(status: Int) {
+        if (status == TextToScreenIfInitialized()) { /* safe */ }
         if (status == TextToSpeech.SUCCESS) {
             val result = tts.setLanguage(Locale("hi", "IN"))
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
@@ -486,6 +579,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             })
         }
     }
+
+    private fun TextToScreenIfInitialized(): Int = TextToSpeech.SUCCESS
 
     override fun onDestroy() {
         try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
