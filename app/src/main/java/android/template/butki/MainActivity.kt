@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSpeaking = false
+    private var isPopupOpen = false // 🔴 NAYA LOCK: Double Mic Clash rokne ke liye
     private var isWaitingForWakeWord = true
     private var isTrainingVoice = false
     private val currentRmsSamples = mutableListOf<Float>()
@@ -80,7 +81,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val text = intent.getStringExtra("text") ?: ""
                 val canReply = intent.getBooleanExtra("canReply", false)
                 
-                if (title.isNotEmpty() && text.isNotEmpty() && !isSpeaking) {
+                if (title.isNotEmpty() && text.isNotEmpty() && !isSpeaking && !isPopupOpen) {
                     pendingNotificationTitle = title
                     pendingNotificationText = text
                     canReplyToCurrentNotification = canReply
@@ -150,7 +151,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showVoiceEnrollDialog() {
-        speechRecognizer?.stopListening()
+        killBackgroundMic() // Mic free karo
         val currentPhrase = sharedPreferences.getString("BOSS_WAKE_PHRASE", "Not Set (Default: Hey Butki)")
 
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -161,7 +162,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 isWaitingForWakeWord = false
                 txtStatus.text = "● RECORDING VOICE SAMPLE..."
                 txtResponse.text = "Abhi boliye apna secret wake-word..."
-                startPopupMic() // Pakka sunne ke liye Popup Mic kholenge
+                startPopupMic()
             }
             .setNeutralButton("Remove Lock") { _, _ ->
                 sharedPreferences.edit().remove("BOSS_WAKE_PHRASE").remove("BOSS_VOICE_RMS").apply()
@@ -183,9 +184,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
+        val cn = ComponentName(this, ButkiNotificationService::class.java)
+        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        val enabled = flat != null && flat.contains(cn.flattenToString())
+        
+        if (enabled && ::txtResponse.isInitialized && txtResponse.text.toString().contains("allow kijiye")) {
+            txtResponse.text = "● System Ready! Beech wale 'B' par Tap karke boliye!"
+        }
+
         val savedKey = sharedPreferences.getString("GEMINI_API_KEY", "")
-        if (!savedKey.isNullOrEmpty() && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            restartListeningWithDelay(500)
+        // Agar popup khula nahi hai, tabhi background mic chalu karo
+        if (!isPopupOpen && !savedKey.isNullOrEmpty() && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            restartListeningWithDelay(600)
         }
     }
 
@@ -248,7 +258,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             layoutParams = RelativeLayout.LayoutParams(750, 750).apply {
                 addRule(RelativeLayout.CENTER_IN_PARENT)
             }
-            // 🔴 100% FAIL-SAFE: 'B' par tap karte hi Google ka Direct Mic khulega! 🔴
+            // 🔴 TAP ON 'B': Pehle background mic band karega, fir Popup kholega (Zero Clash!)
             setOnClickListener {
                 tts.stop()
                 isSpeaking = false
@@ -298,7 +308,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtResponse = TextView(this).apply {
-            text = "System Ready! Beech wale 'B' par Tap karke boliye, ya \"Hey Butki\" kahiye!"
+            text = "System Ready! Beech wale 'B' par Tap karke boliye!"
             textSize = 16f
             setTextColor(Color.parseColor("#F5F5FF"))
             setLineSpacing(10f, 1.0f)
@@ -312,40 +322,64 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(root)
     }
 
-    // 🔴 NAYA ENGINE: POPUP MIC (Yeh har phone me 100% kaam karta hai) 🔴
-    private fun startPopupMic() {
+    // 🔴 NAYA FUNCTION: Background Mic ko jad se band karne ke liye taaki Popup Mic free ho jaye
+    private fun killBackgroundMic() {
+        mainHandler.removeCallbacksAndMessages(null)
         try {
             speechRecognizer?.stopListening()
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-                putExtra(RecognizerIntent.EXTRA_PROMPT, if (isTrainingVoice) "Apna Secret Wake-Word Boliye..." else "Boliye Boss, Butki sun rahi hai...")
+            speechRecognizer?.cancel()
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+        } catch (e: Exception) {}
+    }
+
+    // 🔴 CLASH-FREE POPUP MIC 🔴
+    private fun startPopupMic() {
+        isPopupOpen = true
+        killBackgroundMic() // Pehle background mic ko poori tarah hatao
+        txtStatus.text = "● POPUP MIC ACTIVE..."
+
+        // 150ms ka break do taaki Android microphone hardware ko release kar de
+        mainHandler.postDelayed({
+            try {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+                    putExtra(RecognizerIntent.EXTRA_PROMPT, if (isTrainingVoice) "Apna Secret Wake-Word Boliye..." else "Boliye Boss, Butki sun rahi hai...")
+                }
+                startActivityForResult(intent, 200)
+            } catch (e: Exception) {
+                isPopupOpen = false
+                Toast.makeText(this, "Phone me Google Voice Search active nahi hai!", Toast.LENGTH_LONG).show()
             }
-            startActivityForResult(intent, 200)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Phone me Google Voice Search active nahi hai!", Toast.LENGTH_LONG).show()
-        }
+        }, 150)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 200 && resultCode == Activity.RESULT_OK && data != null) {
-            val matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val spokenText = matches?.firstOrNull()?.lowercase()?.trim() ?: ""
-            
-            if (spokenText.isNotEmpty()) {
-                if (isTrainingVoice) {
-                    isTrainingVoice = false
-                    isWaitingForWakeWord = true
-                    sharedPreferences.edit().putString("BOSS_WAKE_PHRASE", spokenText).apply()
-                    txtResponse.text = "✅ Voice Lock Saved: \"$spokenText\""
-                    speakOut("Boss, aapka secret code '$spokenText' maine save kar liya hai!")
-                } else {
-                    // Direct tap karke bola hai toh seedha jawab do
-                    isWaitingForWakeWord = false
-                    processSpokenText(spokenText, matches, 5.0f, true)
+        if (requestCode == 200) {
+            isPopupOpen = false // Popup band ho gaya
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                val matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                val spokenText = matches?.firstOrNull()?.lowercase()?.trim() ?: ""
+                
+                if (spokenText.isNotEmpty()) {
+                    if (isTrainingVoice) {
+                        isTrainingVoice = false
+                        isWaitingForWakeWord = true
+                        sharedPreferences.edit().putString("BOSS_WAKE_PHRASE", spokenText).apply()
+                        txtResponse.text = "✅ Voice Lock Saved: \"$spokenText\""
+                        speakOut("Boss, aapka secret code '$spokenText' maine save kar liya hai!")
+                    } else {
+                        isWaitingForWakeWord = false
+                        processSpokenText(spokenText, matches, 5.0f, true)
+                    }
+                    return
                 }
             }
+            // Agar user ne bina bole popup cancel kar diya, toh wapas background mic chalu karo
+            txtStatus.text = "● TAP 'B' TO SPEAK"
+            restartListeningWithDelay(500)
         }
     }
 
@@ -368,13 +402,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun setupContinuousSpeechRecognizer() {
+        if (isPopupOpen || isSpeaking) return
+
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            txtStatus.text = "● TAP 'B' TO SPEAK (BG MIC NOT SUPPORTED)"
-            txtResponse.text = "Boss, aapka phone background mic allow nahi kar raha. Baat karne ke liye beech wale 'B' par Tap karein!"
+            txtStatus.text = "● TAP 'B' TO SPEAK"
             return
         }
 
-        speechRecognizer?.destroy()
+        killBackgroundMic()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
         recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -386,11 +421,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
-                if (!isSpeaking) {
+                if (!isSpeaking && !isPopupOpen) {
                     if (isAskingNotificationPermission || isAskingToReply || isWaitingForReplyText) {
                         txtStatus.text = "● WAITING FOR YOUR ANSWER..."
                     } else if (isWaitingForWakeWord) {
-                        txtStatus.text = "● LISTENING FOR 'HEY BUTKI' (OR TAP 'B')..."
+                        txtStatus.text = "● SAY 'HEY BUTKI' OR TAP 'B'..."
                     } else {
                         txtStatus.text = "● LISTENING TO COMMAND..."
                     }
@@ -400,11 +435,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             override fun onBeginningOfSpeech() {
                 currentRmsSamples.clear()
-                txtStatus.text = "● HEARING VOICE..."
+                if (!isPopupOpen) txtStatus.text = "● HEARING VOICE..."
             }
 
             override fun onRmsChanged(rmsdB: Float) {
-                if (!isSpeaking) {
+                if (!isSpeaking && !isPopupOpen) {
                     neonVisualizer.updateVoiceLevel(rmsdB.coerceAtLeast(0f))
                     if (rmsdB > 2.0f) currentRmsSamples.add(rmsdB)
                 }
@@ -418,16 +453,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             override fun onError(error: Int) {
                 neonVisualizer.updateVoiceLevel(1f)
-                // Screen par dikhao ki mic kyu ruka
-                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
-                    txtResponse.text = "⚠️ Mic Permission Error! AndroidManifest me <queries> add karein ya 'B' par tap karein."
-                }
-                if (!isSpeaking) {
+                if (!isSpeaking && !isPopupOpen) {
                     restartListeningWithDelay(800)
                 }
             }
 
             override fun onResults(results: Bundle?) {
+                if (isPopupOpen) return
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val spokenText = matches?.firstOrNull()?.lowercase()?.trim() ?: ""
                 val avgRms = if (currentRmsSamples.isNotEmpty()) currentRmsSamples.average().toFloat() else 5.0f
@@ -440,6 +472,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
+                if (isPopupOpen) return
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val currentText = matches?.firstOrNull()?.lowercase() ?: ""
                 if (currentText.isNotEmpty() && !isSpeaking) {
@@ -535,9 +568,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun startListeningLoop() {
-        if (!isSpeaking) {
+        if (!isSpeaking && !isPopupOpen) {
             try {
-                speechRecognizer?.startListening(recognizerIntent)
+                if (speechRecognizer == null) {
+                    setupContinuousSpeechRecognizer()
+                } else {
+                    speechRecognizer?.startListening(recognizerIntent)
+                }
             } catch (e: Exception) {
                 restartListeningWithDelay(1000)
             }
@@ -547,7 +584,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun restartListeningWithDelay(delayMillis: Long) {
         mainHandler.removeCallbacksAndMessages(null)
         mainHandler.postDelayed({
-            if (!isSpeaking) {
+            if (!isSpeaking && !isPopupOpen) {
                 startListeningLoop()
             }
         }, delayMillis)
@@ -562,7 +599,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         isSpeaking = true
-        speechRecognizer?.stopListening()
+        killBackgroundMic()
         txtStatus.text = "● BUTKI IS THINKING..."
         neonVisualizer.setMode(1)
 
@@ -637,8 +674,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
-        mainHandler.removeCallbacksAndMessages(null)
-        speechRecognizer?.destroy()
+        killBackgroundMic()
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         super.onDestroy()
     }
