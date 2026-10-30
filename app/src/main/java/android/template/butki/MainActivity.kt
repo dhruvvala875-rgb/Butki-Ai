@@ -147,10 +147,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .show()
     }
 
+    // 🔴 UPDATED TO GEMINI-2.0-FLASH MODEL
     private fun setupGeminiAI(apiKey: String) {
         generativeModel = GenerativeModel(
-            modelName = "gemini-1.5-flash",
-            apiKey = apiKey 
+            modelName = "gemini-2.0-flash",
+            apiKey = apiKey.trim() 
         )
     }
 
@@ -321,7 +322,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(root)
     }
 
-    // 🔴 ERROR FIXED HERE: Used exact string "hi-IN" instead of Locale object
     private fun startCleanPopupMic() {
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
