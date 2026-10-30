@@ -147,9 +147,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .show()
     }
 
+    // 🔴 FAST & STABLE MODEL CONFIGURED
     private fun setupGeminiAI(apiKey: String) {
         generativeModel = GenerativeModel(
-            modelName = "gemini-3.8-flash",
+            modelName = "gemini-2.0-flash",
             apiKey = apiKey.trim() 
         )
     }
@@ -455,9 +456,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("hi", "IN")
-            tts.setPitch(1.3f) 
-            tts.setSpeechRate(0.95f)
+            val result = tts.setLanguage(Locale("hi", "IN"))
+            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                tts.language = Locale.getDefault()
+            }
+
+            // 🔴 SOFT & CARING FEMALE VOICE TUNING
+            tts.setPitch(1.10f)   // Natural soft pitch
+            tts.setSpeechRate(0.92f) // Relaxed and smooth speaking speed
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) { isSpeaking = true }
