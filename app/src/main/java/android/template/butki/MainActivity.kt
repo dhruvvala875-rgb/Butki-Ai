@@ -17,15 +17,14 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.LinearInterpolator
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
@@ -48,21 +47,16 @@ import kotlin.math.sin
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var tts: TextToSpeech
-    private var speechRecognizer: SpeechRecognizer? = null
-    private lateinit var recognizerIntent: Intent
     private var generativeModel: GenerativeModel? = null 
     private lateinit var sharedPreferences: SharedPreferences
 
     private lateinit var txtResponse: TextView
     private lateinit var txtStatus: TextView
     private lateinit var neonVisualizer: NeonOrbView
+    private lateinit var inputMessage: EditText
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSpeaking = false
-    private var isPopupOpen = false // 🔴 NAYA LOCK: Double Mic Clash rokne ke liye
-    private var isWaitingForWakeWord = true
-    private var isTrainingVoice = false
-    private val currentRmsSamples = mutableListOf<Float>()
 
     private var savedSchedule: String = "Abhi tak koi schedule set nahi kiya hai aapne."
     private var savedTasks: MutableList<String> = mutableListOf()
@@ -81,7 +75,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val text = intent.getStringExtra("text") ?: ""
                 val canReply = intent.getBooleanExtra("canReply", false)
                 
-                if (title.isNotEmpty() && text.isNotEmpty() && !isSpeaking && !isPopupOpen) {
+                if (title.isNotEmpty() && text.isNotEmpty() && !isSpeaking) {
                     pendingNotificationTitle = title
                     pendingNotificationText = text
                     canReplyToCurrentNotification = canReply
@@ -89,10 +83,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     isAskingNotificationPermission = true
                     isAskingToReply = false
                     isWaitingForReplyText = false
-                    isWaitingForWakeWord = false
                     
-                    val promptText = "Boss, $title ki taraf se ek message aaya hai. Kya main padh ke sunau?"
-                    txtResponse.text = "● Notification Detected..."
+                    val promptText = "Boss, $title ki taraf se ek message aaya hai. Kya main padh ke sunau? Jawab dene ke liye B par tap karein."
+                    txtResponse.text = "● Notification from $title\nTap 'B' to say Haan or Nahi."
                     speakOut(promptText)
                 }
             }
@@ -116,13 +109,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } catch (ex: Exception) { }
         }
 
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
+        }
+
         val savedKey = sharedPreferences.getString("GEMINI_API_KEY", "")
         if (savedKey.isNullOrEmpty()) {
             showApiKeyDialog()
         } else {
             setupGeminiAI(savedKey)
             checkNotificationPermission()
-            checkPermissionsAndStart()
         }
     }
 
@@ -142,35 +138,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     sharedPreferences.edit().putString("GEMINI_API_KEY", key).apply()
                     setupGeminiAI(key)
                     checkNotificationPermission()
-                    checkPermissionsAndStart()
                 } else {
                     showApiKeyDialog() 
                 }
-            }
-            .show()
-    }
-
-    private fun showVoiceEnrollDialog() {
-        killBackgroundMic() // Mic free karo
-        val currentPhrase = sharedPreferences.getString("BOSS_WAKE_PHRASE", "Not Set (Default: Hey Butki)")
-
-        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("🎙️ Boss Voice Lock Setup")
-            .setMessage("Current Lock: \"$currentPhrase\"\n\n'Record My Voice' dabayein aur apna wake-word (jaise 'Hey Butki') boliye.")
-            .setPositiveButton("Record My Voice") { _, _ ->
-                isTrainingVoice = true
-                isWaitingForWakeWord = false
-                txtStatus.text = "● RECORDING VOICE SAMPLE..."
-                txtResponse.text = "Abhi boliye apna secret wake-word..."
-                startPopupMic()
-            }
-            .setNeutralButton("Remove Lock") { _, _ ->
-                sharedPreferences.edit().remove("BOSS_WAKE_PHRASE").remove("BOSS_VOICE_RMS").apply()
-                Toast.makeText(this, "Voice Lock Removed!", Toast.LENGTH_SHORT).show()
-                restartListeningWithDelay(400)
-            }
-            .setNegativeButton("Cancel") { _, _ ->
-                restartListeningWithDelay(400)
             }
             .show()
     }
@@ -180,23 +150,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             modelName = "gemini-1.5-flash",
             apiKey = apiKey 
         )
-    }
-
-    override fun onResume() {
-        super.onResume()
-        val cn = ComponentName(this, ButkiNotificationService::class.java)
-        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        val enabled = flat != null && flat.contains(cn.flattenToString())
-        
-        if (enabled && ::txtResponse.isInitialized && txtResponse.text.toString().contains("allow kijiye")) {
-            txtResponse.text = "● System Ready! Beech wale 'B' par Tap karke boliye!"
-        }
-
-        val savedKey = sharedPreferences.getString("GEMINI_API_KEY", "")
-        // Agar popup khula nahi hai, tabhi background mic chalu karo
-        if (!isPopupOpen && !savedKey.isNullOrEmpty() && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            restartListeningWithDelay(600)
-        }
     }
 
     private fun checkNotificationPermission() {
@@ -212,7 +165,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun setupFuturisticUI() {
         val root = RelativeLayout(this).apply {
             setBackgroundColor(Color.parseColor("#05050C"))
-            setPadding(45, 80, 45, 60)
+            setPadding(40, 70, 40, 40)
         }
 
         val headerLayout = LinearLayout(this).apply {
@@ -241,13 +194,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtStatus = TextView(this).apply {
-            text = "● TAP 'B' TO SPEAK DIRECTLY"
-            textSize = 12f
+            text = "● READY! TAP 'B' TO SPEAK"
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#FF007F"))
-            setShadowLayer(15f, 0f, 0f, Color.parseColor("#FF007F"))
+            setTextColor(Color.parseColor("#00FF9D"))
+            setShadowLayer(15f, 0f, 0f, Color.parseColor("#00FF9D"))
             gravity = Gravity.CENTER
-            setPadding(0, 18, 0, 0)
+            setPadding(0, 15, 0, 0)
         }
 
         headerLayout.addView(titleText)
@@ -255,35 +208,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         root.addView(headerLayout)
 
         neonVisualizer = NeonOrbView(this).apply {
-            layoutParams = RelativeLayout.LayoutParams(750, 750).apply {
+            layoutParams = RelativeLayout.LayoutParams(680, 680).apply {
                 addRule(RelativeLayout.CENTER_IN_PARENT)
             }
-            // 🔴 TAP ON 'B': Pehle background mic band karega, fir Popup kholega (Zero Clash!)
+            // 🔴 ZERO CLASH MIC: Background me kuch nahi chal raha, seedha clean mic khulega!
             setOnClickListener {
                 tts.stop()
                 isSpeaking = false
-                isWaitingForWakeWord = false
-                startPopupMic()
-            }
-            setOnLongClickListener {
-                tts.stop()
-                isSpeaking = false
-                showVoiceEnrollDialog()
-                true
+                startCleanPopupMic()
             }
         }
         root.addView(neonVisualizer)
 
         val cardBg = GradientDrawable().apply {
             setColor(Color.parseColor("#121225"))
-            cornerRadius = 45f
+            cornerRadius = 40f
             setStroke(3, Color.parseColor("#00F0FF"))
         }
 
         val consoleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = cardBg
-            setPadding(50, 40, 50, 40)
+            setPadding(40, 35, 40, 35)
             layoutParams = RelativeLayout.LayoutParams(
                 RelativeLayout.LayoutParams.MATCH_PARENT,
                 RelativeLayout.LayoutParams.WRAP_CONTENT
@@ -293,233 +239,130 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val streamLabel = TextView(this).apply {
-            text = "NEURAL AUDIO STREAM // (TAP 'B' TO TALK)"
+            text = "NEURAL STREAM // TAP 'B' OR TYPE BELOW"
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#00F0FF"))
-            setPadding(0, 0, 0, 14)
+            setPadding(0, 0, 0, 12)
         }
 
         val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                220
+            )
+        }
+
+        txtResponse = TextView(this).apply {
+            text = "System Ready Boss!\n1. Bolne ke liye beech wale 'B' par Tap karein.\n2. Ya niche box mein type karke Send dabayein!"
+            textSize = 15f
+            setTextColor(Color.parseColor("#F5F5FF"))
+            setLineSpacing(8f, 1.0f)
+        }
+        scrollView.addView(txtResponse)
+
+        // 🔴 NAYA BACKUP FEATURE: Text Input Box (Agar mic kabhi kaam na kare toh type karein)
+        val inputRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 20, 0, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
 
-        txtResponse = TextView(this).apply {
-            text = "System Ready! Beech wale 'B' par Tap karke boliye!"
-            textSize = 16f
-            setTextColor(Color.parseColor("#F5F5FF"))
-            setLineSpacing(10f, 1.0f)
+        val editBg = GradientDrawable().apply {
+            setColor(Color.parseColor("#1E1E38"))
+            cornerRadius = 25f
+            setStroke(2, Color.parseColor("#FF007F"))
         }
 
-        scrollView.addView(txtResponse)
+        inputMessage = EditText(this).apply {
+            hint = "Yahan likh kar bhi baat kar sakte hain..."
+            setHintTextColor(Color.parseColor("#8888AA"))
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            background = editBg
+            setPadding(30, 20, 30, 20)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val btnSend = Button(this).apply {
+            text = "SEND"
+            setTextColor(Color.BLACK)
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#00F0FF"))
+                cornerRadius = 25f
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = 20 }
+            
+            setOnClickListener {
+                val msg = inputMessage.text.toString().trim()
+                if (msg.isNotEmpty()) {
+                    inputMessage.setText("")
+                    processSpokenText(msg.lowercase())
+                }
+            }
+        }
+
+        inputRow.addView(inputMessage)
+        inputRow.addView(btnSend)
+
         consoleLayout.addView(streamLabel)
         consoleLayout.addView(scrollView)
+        consoleLayout.addView(inputRow)
         root.addView(consoleLayout)
 
         setContentView(root)
     }
 
-    // 🔴 NAYA FUNCTION: Background Mic ko jad se band karne ke liye taaki Popup Mic free ho jaye
-    private fun killBackgroundMic() {
-        mainHandler.removeCallbacksAndMessages(null)
+    // 🔴 100% CLEAN MIC: Koi background service nahi hai jo isko block kare!
+    private fun startCleanPopupMic() {
         try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
-            speechRecognizer = null
-        } catch (e: Exception) {}
-    }
-
-    // 🔴 CLASH-FREE POPUP MIC 🔴
-    private fun startPopupMic() {
-        isPopupOpen = true
-        killBackgroundMic() // Pehle background mic ko poori tarah hatao
-        txtStatus.text = "● POPUP MIC ACTIVE..."
-
-        // 150ms ka break do taaki Android microphone hardware ko release kar de
-        mainHandler.postDelayed({
-            try {
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, if (isTrainingVoice) "Apna Secret Wake-Word Boliye..." else "Boliye Boss, Butki sun rahi hai...")
-                }
-                startActivityForResult(intent, 200)
-            } catch (e: Exception) {
-                isPopupOpen = false
-                Toast.makeText(this, "Phone me Google Voice Search active nahi hai!", Toast.LENGTH_LONG).show()
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                // Default phone language + Hindi/English support
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Boliye Boss, Butki sun rahi hai...")
             }
-        }, 150)
+            startActivityForResult(intent, 200)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Mic Error! Niche box me type karke baat karein.", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 200) {
-            isPopupOpen = false // Popup band ho gaya
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                val matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                val spokenText = matches?.firstOrNull()?.lowercase()?.trim() ?: ""
-                
-                if (spokenText.isNotEmpty()) {
-                    if (isTrainingVoice) {
-                        isTrainingVoice = false
-                        isWaitingForWakeWord = true
-                        sharedPreferences.edit().putString("BOSS_WAKE_PHRASE", spokenText).apply()
-                        txtResponse.text = "✅ Voice Lock Saved: \"$spokenText\""
-                        speakOut("Boss, aapka secret code '$spokenText' maine save kar liya hai!")
-                    } else {
-                        isWaitingForWakeWord = false
-                        processSpokenText(spokenText, matches, 5.0f, true)
-                    }
-                    return
-                }
+        if (requestCode == 200 && resultCode == Activity.RESULT_OK && data != null) {
+            val matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            val spokenText = matches?.firstOrNull()?.trim() ?: ""
+            
+            if (spokenText.isNotEmpty()) {
+                processSpokenText(spokenText.lowercase())
             }
-            // Agar user ne bina bole popup cancel kar diya, toh wapas background mic chalu karo
-            txtStatus.text = "● TAP 'B' TO SPEAK"
-            restartListeningWithDelay(500)
         }
     }
 
-    private fun checkPermissionsAndStart() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            setupContinuousSpeechRecognizer()
-        } else {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
-        }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            setupContinuousSpeechRecognizer()
-        } else {
-            txtStatus.text = "● MIC PERMISSION DENIED"
-            txtResponse.text = "Microphone permission allow karein."
-        }
-    }
-
-    private fun setupContinuousSpeechRecognizer() {
-        if (isPopupOpen || isSpeaking) return
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            txtStatus.text = "● TAP 'B' TO SPEAK"
-            return
-        }
-
-        killBackgroundMic()
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-
-        recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-        }
-
-        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                if (!isSpeaking && !isPopupOpen) {
-                    if (isAskingNotificationPermission || isAskingToReply || isWaitingForReplyText) {
-                        txtStatus.text = "● WAITING FOR YOUR ANSWER..."
-                    } else if (isWaitingForWakeWord) {
-                        txtStatus.text = "● SAY 'HEY BUTKI' OR TAP 'B'..."
-                    } else {
-                        txtStatus.text = "● LISTENING TO COMMAND..."
-                    }
-                    neonVisualizer.setMode(0)
-                }
-            }
-
-            override fun onBeginningOfSpeech() {
-                currentRmsSamples.clear()
-                if (!isPopupOpen) txtStatus.text = "● HEARING VOICE..."
-            }
-
-            override fun onRmsChanged(rmsdB: Float) {
-                if (!isSpeaking && !isPopupOpen) {
-                    neonVisualizer.updateVoiceLevel(rmsdB.coerceAtLeast(0f))
-                    if (rmsdB > 2.0f) currentRmsSamples.add(rmsdB)
-                }
-            }
-
-            override fun onBufferReceived(buffer: ByteArray?) {}
-
-            override fun onEndOfSpeech() {
-                neonVisualizer.updateVoiceLevel(1f)
-            }
-
-            override fun onError(error: Int) {
-                neonVisualizer.updateVoiceLevel(1f)
-                if (!isSpeaking && !isPopupOpen) {
-                    restartListeningWithDelay(800)
-                }
-            }
-
-            override fun onResults(results: Bundle?) {
-                if (isPopupOpen) return
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val spokenText = matches?.firstOrNull()?.lowercase()?.trim() ?: ""
-                val avgRms = if (currentRmsSamples.isNotEmpty()) currentRmsSamples.average().toFloat() else 5.0f
-
-                if (spokenText.isNotEmpty()) {
-                    processSpokenText(spokenText, matches, avgRms, false)
-                } else {
-                    restartListeningWithDelay(500)
-                }
-            }
-
-            override fun onPartialResults(partialResults: Bundle?) {
-                if (isPopupOpen) return
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val currentText = matches?.firstOrNull()?.lowercase() ?: ""
-                if (currentText.isNotEmpty() && !isSpeaking) {
-                    txtResponse.text = "Sun rahi hoon: \"$currentText...\""
-                }
-            }
-
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-
-        startListeningLoop()
-    }
-
-    private fun processSpokenText(spokenText: String, matches: ArrayList<String>?, avgRms: Float, isDirectTap: Boolean) {
-        var containsDefaultButki = false
-        matches?.forEach { match ->
-            val text = match.lowercase()
-            if (text.contains("butki") || text.contains("bootki") || text.contains("bhootki") || text.contains("bhutki") || text.contains("chutki") || text.contains("putki") || text.contains("boot ki") || text.contains("hutki")) {
-                containsDefaultButki = true
-            }
-        }
-
-        if (isTrainingVoice) {
-            isTrainingVoice = false
-            isWaitingForWakeWord = true
-            sharedPreferences.edit()
-                .putString("BOSS_WAKE_PHRASE", spokenText)
-                .putFloat("BOSS_VOICE_RMS", avgRms)
-                .apply()
-            txtResponse.text = "✅ Voice Print Saved: \"$spokenText\""
-            speakOut("Boss, aapki aawaz aur secret code '$spokenText' maine lock kar liya hai!")
-            return
-        }
-
+    private fun processSpokenText(spokenText: String) {
         if (isAskingNotificationPermission) {
             if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("padh") || spokenText.contains("sunao")) {
                 isAskingNotificationPermission = false
                 if (canReplyToCurrentNotification) {
                     isAskingToReply = true
+                    txtResponse.text = "Msg: \"$pendingNotificationText\"\n(Tap 'B' to say Haan/Nahi for reply)"
                     speakOut("Message hai: $pendingNotificationText. Kya iska reply karna hai Boss?")
                 } else {
-                    isWaitingForWakeWord = true
+                    txtResponse.text = "Msg: \"$pendingNotificationText\""
                     speakOut("Message hai: $pendingNotificationText.")
                 }
             } else {
                 isAskingNotificationPermission = false
-                isWaitingForWakeWord = true
+                txtResponse.text = "● Notification Ignored."
                 speakOut("Theek hai Boss, main ise ignore kar rahi hoon.")
             }
         } 
@@ -527,67 +370,29 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("karo") || spokenText.contains("bhej")) {
                 isAskingToReply = false
                 isWaitingForReplyText = true
-                speakOut("Bataiye Boss, kya reply bhejna hai?")
+                txtResponse.text = "● Tap 'B' and speak your reply message..."
+                speakOut("Bataiye Boss, kya reply bhejna hai? B par tap karke boliye.")
             } else {
                 isAskingToReply = false
-                isWaitingForWakeWord = true
+                txtResponse.text = "● Reply Cancelled."
                 speakOut("Theek hai Boss, koi reply nahi bhej rahi.")
             }
         }
         else if (isWaitingForReplyText) {
             isWaitingForReplyText = false
-            isWaitingForWakeWord = true
             val success = ButkiNotificationService.sendReply(this@MainActivity, spokenText)
-            if (success) speakOut("Message bhej diya Boss!") else speakOut("Sorry Boss, reply nahi ja saka.")
-        } 
-        else if (isWaitingForWakeWord && !isDirectTap) {
-            val savedPhrase = sharedPreferences.getString("BOSS_WAKE_PHRASE", "")
-            if (!savedPhrase.isNullOrEmpty()) {
-                val phraseMatched = matches?.any { it.lowercase().contains(savedPhrase) || savedPhrase.contains(it.lowercase()) } == true
-                if (phraseMatched) {
-                    isWaitingForWakeWord = false
-                    txtResponse.text = "🔓 Boss Verified! Listening..."
-                    speakOut("Aawaz pehchan li Boss! Boliye, kya hukam hai?")
-                } else {
-                    restartListeningWithDelay(500)
-                }
+            if (success) {
+                txtResponse.text = "✅ Sent Reply: \"$spokenText\""
+                speakOut("Message bhej diya Boss!")
             } else {
-                if (containsDefaultButki) {
-                    isWaitingForWakeWord = false
-                    txtResponse.text = "● Awake. Listening..."
-                    speakOut("Haan boliye Boss, main sun rahi hoon!")
-                } else {
-                    restartListeningWithDelay(500)
-                }
+                txtResponse.text = "❌ Reply Failed."
+                speakOut("Sorry Boss, reply nahi ja saka.")
             }
         } 
         else {
-            txtResponse.text = "Aapne kaha: \"$spokenText\""
+            txtResponse.text = "Boss: \"$spokenText\"\nButki soch rahi hai..."
             askButki(spokenText)
         }
-    }
-
-    private fun startListeningLoop() {
-        if (!isSpeaking && !isPopupOpen) {
-            try {
-                if (speechRecognizer == null) {
-                    setupContinuousSpeechRecognizer()
-                } else {
-                    speechRecognizer?.startListening(recognizerIntent)
-                }
-            } catch (e: Exception) {
-                restartListeningWithDelay(1000)
-            }
-        }
-    }
-
-    private fun restartListeningWithDelay(delayMillis: Long) {
-        mainHandler.removeCallbacksAndMessages(null)
-        mainHandler.postDelayed({
-            if (!isSpeaking && !isPopupOpen) {
-                startListeningLoop()
-            }
-        }, delayMillis)
     }
 
     private fun askButki(prompt: String) {
@@ -599,9 +404,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         isSpeaking = true
-        killBackgroundMic()
         txtStatus.text = "● BUTKI IS THINKING..."
         neonVisualizer.setMode(1)
+
+        val lowerPrompt = prompt.lowercase()
+        if (lowerPrompt.contains("schedule") || lowerPrompt.contains("time table") || lowerPrompt.contains("routine")) {
+            savedSchedule = prompt
+        } else if (lowerPrompt.contains("task") || lowerPrompt.contains("kaam")) {
+            savedTasks.add(prompt)
+        }
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -610,133 +421,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     CRITICAL RULE 1: Always address the user as "Boss" affectionately. 
                     CRITICAL RULE 2: NEVER use emojis, asterisks, or special characters.
                     CRITICAL RULE 3: Reply in conversational Hindi/Hinglish (1-2 short sentences).
+                    User's Saved Schedule: "$savedSchedule"
                     User's input: $prompt
                 """.trimIndent()
 
-                val response = aiModel.generateContent(personaPrompt)
-                val answer = response.text?.replace(Regex("[*#~]"), "") ?: "Kuch samajh nahi aaya Boss, phir se boliye na."
-
-                withContext(Dispatchers.Main) {
-                    txtResponse.text = "Butki: \"$answer\""
-                    speakOut(answer)
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    txtStatus.text = "● API ERROR"
-                    txtResponse.text = "Error: ${e.localizedMessage}"
-                    speakOut("Sorry Boss, internet ya API key mein kuch problem aa rahi hai.")
-                }
-            }
-        }
-    }
-
-    private fun speakOut(text: String) {
-        isSpeaking = true
-        txtStatus.text = "● BUTKI IS SPEAKING..."
-        neonVisualizer.setMode(2)
-        neonVisualizer.updateVoiceLevel(8f)
-
-        val params = Bundle()
-        params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "BUTKI_VOICE")
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "BUTKI_VOICE")
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("hi", "IN")
-            tts.setPitch(1.3f) 
-            tts.setSpeechRate(0.95f)
-
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) { isSpeaking = true }
-
-                override fun onDone(utteranceId: String?) {
-                    mainHandler.post {
-                        neonVisualizer.setMode(0)
-                        neonVisualizer.updateVoiceLevel(1f)
-                        isSpeaking = false
-                        if (!isAskingNotificationPermission && !isAskingToReply && !isWaitingForReplyText) {
-                            isWaitingForWakeWord = true
-                        }
-                        restartListeningWithDelay(500)
-                    }
-                }
-
-                override fun onError(utteranceId: String?) {
-                    mainHandler.post {
-                        isSpeaking = false
-                        restartListeningWithDelay(500)
-                    }
-                }
-            })
-        }
-    }
-
-    override fun onDestroy() {
-        try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
-        killBackgroundMic()
-        if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
-        super.onDestroy()
-    }
-
-    class NeonOrbView(context: Context) : View(context) {
-        private val cyanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 6f; color = Color.parseColor("#00F0FF")
-            setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
-        }
-        private val pinkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 8f; color = Color.parseColor("#FF007F")
-            setShadowLayer(30f, 0f, 0f, Color.parseColor("#FF007F"))
-        }
-        private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL; color = Color.parseColor("#1800F0FF")
-        }
-        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE; textSize = 110f; typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER
-            setShadowLayer(30f, 0f, 0f, Color.parseColor("#FF007F"))
-        }
-
-        private var angle = 0f; private var voicePulse = 1f; private var mode = 0; private val rect = RectF()
-
-        init {
-            setLayerType(LAYER_TYPE_SOFTWARE, null)
-            ValueAnimator.ofFloat(0f, 360f).apply {
-                duration = 3500; repeatCount = ValueAnimator.INFINITE; interpolator = LinearInterpolator()
-                addUpdateListener {
-                    angle = it.animatedValue as Float
-                    if (mode == 2) voicePulse = 4f + 5f * sin(Math.toRadians(angle.toDouble() * 4)).toFloat()
-                    invalidate()
-                }
-                start()
-            }
-        }
-
-        fun updateVoiceLevel(rms: Float) { voicePulse = rms.coerceIn(0.5f, 12f); invalidate() }
-        fun setMode(newMode: Int) { mode = newMode; invalidate() }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            val cx = width / 2f; val cy = height / 2f
-            val baseR = (width.coerceAtMost(height) / 3.2f) + (voicePulse * 8f)
-            canvas.drawCircle(cx, cy, baseR * 0.72f, corePaint)
-            rect.set(cx - baseR, cy - baseR, cx + baseR, cy + baseR)
-            canvas.drawArc(rect, angle, 75f, false, cyanPaint)
-            canvas.drawArc(rect, angle + 120f, 75f, false, cyanPaint)
-            canvas.drawArc(rect, angle + 240f, 75f, false, cyanPaint)
-
-            val r2 = baseR * 0.84f
-            rect.set(cx - r2, cy - r2, cx + r2, cy + r2)
-            canvas.drawArc(rect, -angle * 1.4f, 110f, false, pinkPaint)
-            canvas.drawArc(rect, -angle * 1.4f + 180f, 110f, false, pinkPaint)
-
-            for (i in 0 until 24) {
-                val rad = Math.toRadians((i * 15 + angle).toDouble())
-                val inner = baseR * 1.06f
-                val outer = inner + (voicePulse * 6f) * abs(sin(rad * 3)).toFloat() + 12f
-                canvas.drawLine(cx + inner * cos(rad).toFloat(), cy + inner * sin(rad).toFloat(),
-                    cx + outer * cos(rad).toFloat(), cy + outer * sin(rad).toFloat(), if (i % 2 == 0) cyanPaint else pinkPaint)
-            }
-            canvas.drawText("B", cx, cy - ((textPaint.descent() + textPaint.ascent()) / 2), textPaint)
-        }
-    }
-}
+                val response = aiModel.generateContent(persona
