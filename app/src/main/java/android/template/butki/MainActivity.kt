@@ -40,11 +40,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.io.IOException
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.cos
@@ -63,7 +63,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSpeaking = false
-    private val httpClient = OkHttpClient()
 
     private var savedSchedule: String = "Abhi tak koi schedule set nahi kiya hai aapne."
     private var savedTasks: MutableList<String> = mutableListOf()
@@ -130,7 +129,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // 🔴 MANUAL GEMINI API KEY DIALOG
     private fun showGeminiApiKeyDialog() {
         val input = EditText(this).apply {
             hint = "Paste Gemini API Key here"
@@ -155,7 +153,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .show()
     }
 
-    // 🔴 MANUAL TINYFISH API KEY DIALOG
     private fun checkTinyFishKey() {
         val savedTinyKey = sharedPreferences.getString("TINYFISH_API_KEY", "")
         if (savedTinyKey.isNullOrEmpty()) {
@@ -191,7 +188,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         )
     }
 
-    // 🔴 TINYFISH WEB AGENT INTEGRATION (USING SAVED MANUAL KEY)
+    // 🔴 TINYFISH WEB AGENT INTEGRATION (USING BUILT-IN HttpURLConnection)
     private fun callTinyFishAgent(targetUrl: String, userGoal: String) {
         val tinyFishApiKey = sharedPreferences.getString("TINYFISH_API_KEY", "") ?: ""
         if (tinyFishApiKey.isEmpty()) {
@@ -199,46 +196,60 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             return
         }
 
-        val url = "https://agent.tinyfish.ai/v1/automate"
-        val jsonBody = JSONObject().apply {
-            put("url", targetUrl)
-            put("goal", userGoal)
-        }
-
-        val body = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-        
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("X-API-Key", tinyFishApiKey)
-            .addHeader("Content-Type", "application/json")
-            .post(body)
-            .build()
-
         isSpeaking = true
         txtStatus.text = "● TINYFISH WORKING..."
         neonVisualizer.setMode(1)
 
-        httpClient.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                mainHandler.post {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val url = URL("https://agent.tinyfish.ai/v1/automate")
+                val conn = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    setRequestProperty("X-API-Key", tinyFishApiKey)
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    doOutput = true
+                }
+
+                val jsonBody = JSONObject().apply {
+                    put("url", targetUrl)
+                    put("goal", userGoal)
+                }
+
+                conn.outputStream.write(jsonBody.toString().toByteArray(Charsets.UTF_8))
+                conn.outputStream.flush()
+
+                val responseCode = conn.responseCode
+                val responseStream = if (responseCode == HttpURLConnection.HTTP_OK) {
+                    conn.inputStream
+                } else {
+                    conn.errorStream
+                }
+
+                val responseString = BufferedReader(InputStreamReader(responseStream)).use { reader ->
+                    val sb = StringBuilder()
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        sb.append(line)
+                    }
+                    sb.toString()
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (responseCode == HttpURLConnection.HTTP_OK) {
+                        txtResponse.text = "✅ TinyFish Result:\n$responseString"
+                        speakOut("Boss, TinyFish ne web data nikal liya hai.")
+                    } else {
+                        txtResponse.text = "❌ TinyFish Error ($responseCode):\n$responseString"
+                        speakOut("Boss, TinyFish task mein error aa gaya.")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
                     txtResponse.text = "❌ TinyFish Connection Failed: ${e.localizedMessage}"
                     speakOut("Sorry Boss, TinyFish se connect nahi ho paya.")
                 }
             }
-
-            override fun onResponse(call: Call, response: Response) {
-                val responseData = response.body?.string()
-                mainHandler.post {
-                    if (response.isSuccessful && responseData != null) {
-                        txtResponse.text = "✅ TinyFish Result:\n$responseData"
-                        speakOut("Boss, TinyFish ne web data nikal liya hai.")
-                    } else {
-                        txtResponse.text = "❌ TinyFish Error: ${response.code}"
-                        speakOut("Boss, TinyFish task mein error aa gaya.")
-                    }
-                }
-            }
-        })
+        }
     }
 
     private fun checkNotificationPermission() {
@@ -275,7 +286,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
             gravity = Gravity.CENTER
             
-            // 🔴 Long-press on title to re-enter keys manually anytime
             setOnLongClickListener {
                 sharedPreferences.edit().clear().apply()
                 showGeminiApiKeyDialog()
@@ -547,7 +557,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onInit(status: Int) {
-        if (status == TextToScreenIfInitialized()) { /* safe */ }
         if (status == TextToSpeech.SUCCESS) {
             val result = tts.setLanguage(Locale("hi", "IN"))
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
@@ -579,8 +588,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             })
         }
     }
-
-    private fun TextToScreenIfInitialized(): Int = TextToSpeech.SUCCESS
 
     override fun onDestroy() {
         try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
