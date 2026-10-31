@@ -1,3 +1,4 @@
+
 package android.template.butki
 
 import android.Manifest
@@ -183,7 +184,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setupGeminiAI(apiKey: String) {
         generativeModel = GenerativeModel(
-            modelName = "gemini-1.5-flash",
+            modelName = "gemini-3.8-flash",
             apiKey = apiKey.trim() 
         )
     }
@@ -279,7 +280,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val titleText = TextView(this).apply {
-            text = "B U T K I    A.I."
+            text = "B U T K I   A.I."
             textSize = 28f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#00F0FF"))
@@ -423,10 +424,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
-                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 5000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_CORRESPONDING_SILENCE_LENGTH_MILLIS, 5000L)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
                 putExtra(RecognizerIntent.EXTRA_PROMPT, "Boliye Boss, Butki sun rahi hai...")
             }
             @Suppress("DEPRECATION")
