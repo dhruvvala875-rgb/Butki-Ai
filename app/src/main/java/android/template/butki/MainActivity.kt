@@ -2,6 +2,7 @@ package android.template.butki
 
 import android.Manifest
 import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -12,18 +13,21 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioFormat
+import android.media.AudioRecord
 import android.media.AudioManager
+import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -39,16 +43,21 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -56,12 +65,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var sharedPreferences: SharedPreferences
     private var geminiApiKey: String = ""
 
-    // 🔴 SILENT & REAL-TIME SPEECH RECOGNIZER VARIABLES
-    private var speechRecognizer: SpeechRecognizer? = null
-    private lateinit var speechIntent: Intent
-    private lateinit var audioManager: AudioManager
-    private var isListening = false
-    private var isContinuousMode = true // Auto-listen after Butki finishes speaking
+    // 🔴 100% SILENT & REAL-TIME GEMINI AUDIO LISTENER (NO BEEP, NO SPEECHRECOGNIZER)
+    private var audioRecord: AudioRecord? = null
+    private var isRecording = false
+    private var recordingJob: Job? = null
+    private var isContinuousMode = true 
+
+    private val sampleRate = 16000
+    private val channelConfig = AudioFormat.CHANNEL_IN_MONO
+    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+    private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat) * 2
+
+    private val silenceThreshold = 650.0 // Aawaz ki sensitivity
+    private val maxSilenceMillis = 1200L // 1.2 second chup rehne par sentence complete
 
     private lateinit var txtResponse: TextView
     private lateinit var txtStatus: TextView
@@ -89,7 +105,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val canReply = intent.getBooleanExtra("canReply", false)
                 
                 if (title.isNotEmpty() && text.isNotEmpty() && !isSpeaking) {
-                    stopSilentListening()
+                    stopSeamlessListening()
                     pendingNotificationTitle = title
                     pendingNotificationText = text
                     canReplyToCurrentNotification = canReply
@@ -112,13 +128,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         window.statusBarColor = Color.parseColor("#05050A")
 
         sharedPreferences = getSharedPreferences("ButkiPrefs", Context.MODE_PRIVATE)
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         setupFuturisticUI()
         
-        // Google TTS Engine for natural female voice
         tts = TextToSpeech(this, this, "com.google.android.tts")
-        setupSilentSpeechRecognizer()
 
         try {
             val filter = IntentFilter("butki.NEW_NOTIFICATION")
@@ -142,83 +155,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // 🔴 BINA POPUP AUR BINA BEEP KE DIRECT LISTENING SETUP
-    private fun setupSilentSpeechRecognizer() {
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true) // Live words dikhane ke liye
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
-
-        speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {
-                // Mic on ho chuka hai, ab sound wapas unmute kar do taaki Butki ki aawaz aaye
-                unmuteSystemBeep()
-                isListening = true
-                txtStatus.text = "● LISTENING... (BOLIYE BOSS)"
-                txtStatus.setTextColor(Color.parseColor("#00F0FF"))
-                neonVisualizer.setMode(3) // Mode 3 = Live Mic Pulse
-            }
-
-            override fun onBeginningOfSpeech() {}
-
-            override fun onRmsChanged(rmsdB: Float) {
-                // Aapki aawaz ke hisaab se Orb (B) hilega!
-                if (isListening) {
-                    val level = (rmsdB.coerceAtLeast(0f) * 1.2f).coerceAtMost(12f)
-                    neonVisualizer.updateVoiceLevel(level)
-                }
-            }
-
-            override fun onBufferReceived(buffer: ByteArray?) {}
-
-            override fun onEndOfSpeech() {
-                isListening = false
-                neonVisualizer.updateVoiceLevel(1f)
-            }
-
-            override fun onError(error: Int) {
-                unmuteSystemBeep()
-                isListening = false
-                neonVisualizer.setMode(0)
-                neonVisualizer.updateVoiceLevel(1f)
-                txtStatus.text = "● READY! TAP 'B' TO SPEAK"
-                txtStatus.setTextColor(Color.parseColor("#00FF9D"))
-            }
-
-            override fun onResults(results: Bundle?) {
-                unmuteSystemBeep()
-                isListening = false
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val spokenText = matches?.firstOrNull()?.trim() ?: ""
-                if (spokenText.isNotEmpty()) {
-                    processSpokenText(spokenText)
-                } else {
-                    neonVisualizer.setMode(0)
-                    txtStatus.text = "● READY! TAP 'B' TO SPEAK"
-                    txtStatus.setTextColor(Color.parseColor("#00FF9D"))
-                }
-            }
-
-            override fun onPartialResults(partialResults: Bundle?) {
-                // Jaise-jaise aap bolenge, live screen par text dikhega!
-                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val liveText = matches?.firstOrNull()?.trim() ?: ""
-                if (liveText.isNotEmpty()) {
-                    txtResponse.text = "Boss (Live): \"$liveText...\""
-                }
-            }
-
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-    }
-
-    // 🔴 BEEP SOUND MUTE KARKE MIC START KARNA
-    private fun startSilentListening() {
+    // 🔴 RAW AUDIO AUDIO-RECORD ENGINE (ZERO BEEP, DIRECT GEMINI AUDIO INPUT)
+    @SuppressLint("MissingPermission")
+    private fun startSeamlessListening() {
+        if (isRecording) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
             return
         }
 
@@ -226,44 +167,121 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             try {
                 if (::tts.isInitialized) tts.stop()
                 isSpeaking = false
-                
-                speechRecognizer?.cancel()
-                muteSystemBeep() // Beep ko chup karao
-                speechRecognizer?.startListening(speechIntent)
-                
-                // Safety fallback: 400ms baad sound wapas on kar do
-                mainHandler.postDelayed({ unmuteSystemBeep() }, 400)
+
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    sampleRate,
+                    channelConfig,
+                    audioFormat,
+                    bufferSize
+                )
+
+                val sessionId = audioRecord?.audioSessionId ?: 0
+                if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sessionId)?.enabled = true
+                if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(sessionId)?.enabled = true
+
+                audioRecord?.startRecording()
+                isRecording = true
+
+                txtStatus.text = "● LISTENING... (SHUDH SUN RAHI HOON)"
+                txtStatus.setTextColor(Color.parseColor("#00F0FF"))
+                neonVisualizer.setMode(3) // Mode 3 = Live Mic Pulse
+
+                recordingJob = CoroutineScope(Dispatchers.IO).launch {
+                    val buffer = ShortArray(bufferSize / 2)
+                    val speechStream = ByteArrayOutputStream()
+                    var isUserSpeaking = false
+                    var lastSpokeTime = System.currentTimeMillis()
+
+                    while (isActive && isRecording) {
+                        val readCount = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                        if (readCount > 0) {
+                            var sum = 0.0
+                            for (i in 0 until readCount) {
+                                sum += buffer[i] * buffer[i]
+                            }
+                            val rms = sqrt(sum / readCount)
+
+                            withContext(Dispatchers.Main) {
+                                val normalizedLevel = (rms / 250.0).toFloat().coerceIn(0.5f, 12f)
+                                neonVisualizer.updateVoiceLevel(normalizedLevel)
+                            }
+
+                            if (rms > silenceThreshold) {
+                                if (!isUserSpeaking) {
+                                    isUserSpeaking = true
+                                    speechStream.reset()
+                                }
+                                lastSpokeTime = System.currentTimeMillis()
+                            }
+
+                            if (isUserSpeaking) {
+                                for (i in 0 until readCount) {
+                                    val s = buffer[i].toInt()
+                                    speechStream.write(s and 0xFF)
+                                    speechStream.write((s shr 8) and 0xFF)
+                                }
+
+                                if (System.currentTimeMillis() - lastSpokeTime > maxSilenceMillis) {
+                                    isUserSpeaking = false
+                                    val finalPcmBytes = speechStream.toByteArray()
+                                    speechStream.reset()
+
+                                    if (finalPcmBytes.size > 3200) { // Sirf tabhi bhejo jab aawaz lambi ho
+                                        stopSeamlessListening()
+                                        val wavBytes = pcmToWav(finalPcmBytes)
+                                        withContext(Dispatchers.Main) {
+                                            processSpokenAudio(wavBytes)
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             } catch (e: Exception) {
-                unmuteSystemBeep()
+                isRecording = false
             }
         }
     }
 
-    private fun stopSilentListening() {
-        mainHandler.post {
-            try {
-                isListening = false
-                speechRecognizer?.stopListening()
-                speechRecognizer?.cancel()
-                unmuteSystemBeep()
-                neonVisualizer.setMode(0)
-                neonVisualizer.updateVoiceLevel(1f)
-            } catch (e: Exception) {}
-        }
+    private fun stopSeamlessListening() {
+        isRecording = false
+        try {
+            recordingJob?.cancel()
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (e: Exception) {}
+        audioRecord = null
     }
 
-    private fun muteSystemBeep() {
-        try {
-            audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0)
-            audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
-        } catch (e: Exception) {}
-    }
+    private fun pcmToWav(pcmBytes: ByteArray): ByteArray {
+        val channels = 1.toShort()
+        val bitDepth = 16.toShort()
+        val byteRate = (sampleRate * channels * (bitDepth / 8)).toLong()
+        val totalDataLen = pcmBytes.size + 36
+        val totalAudioLen = pcmBytes.size.toLong()
 
-    private fun unmuteSystemBeep() {
-        try {
-            audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
-            audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
-        } catch (e: Exception) {}
+        val wavFile = ByteArrayOutputStream()
+        val output = DataOutputStream(wavFile)
+
+        output.writeBytes("RIFF")
+        output.writeInt(Integer.reverseBytes(totalDataLen.toInt()))
+        output.writeBytes("WAVE")
+        output.writeBytes("fmt ")
+        output.writeInt(Integer.reverseBytes(16))
+        output.writeShort(java.lang.Short.reverseBytes(1))
+        output.writeShort(java.lang.Short.reverseBytes(channels))
+        output.writeInt(Integer.reverseBytes(sampleRate))
+        output.writeInt(Integer.reverseBytes(byteRate.toInt()))
+        output.writeShort(java.lang.Short.reverseBytes((channels * (bitDepth / 8)).toShort()))
+        output.writeShort(java.lang.Short.reverseBytes(bitDepth))
+        output.writeBytes("data")
+        output.writeInt(Integer.reverseBytes(totalAudioLen.toInt()))
+        output.write(pcmBytes)
+
+        return wavFile.toByteArray()
     }
 
     private fun showApiKeyDialog() {
@@ -350,19 +368,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 addRule(RelativeLayout.CENTER_IN_PARENT)
             }
             setOnClickListener {
-                if (isListening) {
-                    // Agar pehle se sun rahi hai toh rok do
+                if (isRecording) {
                     isContinuousMode = false
-                    stopSilentListening()
+                    stopSeamlessListening()
                     txtStatus.text = "● PAUSED. TAP 'B' TO START"
                 } else {
-                    // Agar bol rahi hai toh chup kara ke turant sunna shuru karo
                     isContinuousMode = true
                     if (::tts.isInitialized) tts.stop()
                     isSpeaking = false
-                    mainHandler.postDelayed({
-                        startSilentListening()
-                    }, 150)
+                    startSeamlessListening()
                 }
             }
         }
@@ -387,7 +401,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val streamLabel = TextView(this).apply {
-            text = "NEURAL LIVE STREAM // HANDS-FREE VOICE"
+            text = "DIRECT AUDIO NEURAL LIVE STREAM"
             textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor("#00F0FF"))
@@ -402,7 +416,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtResponse = TextView(this).apply {
-            text = "System Ready Boss!\n1. Beech wale 'B' par Tap karein (Bina beep aur popup ke live baat hogi).\n2. Ya niche box mein type karke Send dabayein!"
+            text = "System Ready Boss!\n1. Tap 'B' for zero-beep direct audio chat.\n2. Or type in box and hit SEND!"
             textSize = 15f
             setTextColor(Color.parseColor("#F5F5FF"))
             setLineSpacing(8f, 1.0f)
@@ -451,9 +465,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setOnClickListener {
                 val msg = inputMessage.text.toString().trim()
                 if (msg.isNotEmpty()) {
-                    stopSilentListening()
+                    stopSeamlessListening()
                     inputMessage.setText("")
-                    processSpokenText(msg)
+                    askButkiText(msg)
                 }
             }
         }
@@ -469,74 +483,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(root)
     }
 
-    private fun processSpokenText(rawText: String) {
-        val spokenText = rawText.lowercase()
-
-        if (isAskingNotificationPermission) {
-            if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("padh") || spokenText.contains("sunao")) {
-                isAskingNotificationPermission = false
-                if (canReplyToCurrentNotification) {
-                    isAskingToReply = true
-                    txtResponse.text = "Msg: \"$pendingNotificationText\"\n(Boliye Haan ya Nahi)"
-                    speakOut("Message hai: $pendingNotificationText. Kya iska reply karna hai Boss?")
-                } else {
-                    txtResponse.text = "Msg: \"$pendingNotificationText\""
-                    speakOut("Message hai: $pendingNotificationText.")
-                }
-            } else {
-                isAskingNotificationPermission = false
-                txtResponse.text = "● Notification Ignored."
-                speakOut("Theek hai Boss, main ise ignore kar rahi hoon.")
-            }
-        } 
-        else if (isAskingToReply) {
-            if (spokenText.contains("haan") || spokenText.contains("yes") || spokenText.contains("karo") || spokenText.contains("bhej")) {
-                isAskingToReply = false
-                isWaitingForReplyText = true
-                txtResponse.text = "● Speak your reply message..."
-                speakOut("Bataiye Boss, kya reply bhejna hai?")
-            } else {
-                isAskingToReply = false
-                txtResponse.text = "● Reply Cancelled."
-                speakOut("Theek hai Boss, koi reply nahi bhej rahi.")
-            }
-        }
-        else if (isWaitingForReplyText) {
-            isWaitingForReplyText = false
-            val success = ButkiNotificationService.sendReply(this@MainActivity, rawText)
-            if (success) {
-                txtResponse.text = "✅ Sent Reply: \"$rawText\""
-                speakOut("Message bhej diya Boss!")
-            } else {
-                txtResponse.text = "❌ Reply Failed."
-                speakOut("Sorry Boss, reply nahi ja saka.")
-            }
-        } 
-        else {
-            txtResponse.text = "Boss: \"$rawText\"\nButki soch rahi hai..."
-            askButki(rawText)
-        }
-    }
-
-    // 🔴 SUPERFAST GEMINI-2.5-FLASH (ZERO LATENCY & NO HANGING)
-    private fun askButki(prompt: String) {
-        if (geminiApiKey.isEmpty()) {
-            txtResponse.text = "API Key missing!"
-            speakOut("Boss, meri API key nahi mil rahi hai.")
-            return
-        }
+    private fun processSpokenAudio(wavBytes: ByteArray) {
+        if (geminiApiKey.isEmpty()) return
 
         isSpeaking = true
-        txtStatus.text = "● BUTKI IS THINKING..."
+        txtStatus.text = "● BUTKI IS LISTENING & THINKING..."
         txtStatus.setTextColor(Color.parseColor("#FF007F"))
         neonVisualizer.setMode(1)
 
-        val lowerPrompt = prompt.lowercase()
-        if (lowerPrompt.contains("schedule") || lowerPrompt.contains("time table") || lowerPrompt.contains("routine")) {
-            savedSchedule = prompt
-        } else if (lowerPrompt.contains("task") || lowerPrompt.contains("kaam")) {
-            savedTasks.add(prompt)
-        }
+        val base64Audio = Base64.encodeToString(wavBytes, Base64.NO_WRAP)
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -544,9 +499,94 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
                     CRITICAL RULE 1: Always address the user as "Boss" affectionately. 
                     CRITICAL RULE 2: NEVER use emojis, asterisks, or special characters.
-                    CRITICAL RULE 3: Reply in natural conversational Hinglish/Hindi (1-2 short sentences).
+                    CRITICAL RULE 3: Reply in natural conversational Hinglish/Gujarati/Hindi (1-2 short sentences). Understand user's spoken audio directly without spelling errors.
                     User's Saved Schedule: "$savedSchedule"
-                    User's input: $prompt
+                """.trimIndent()
+
+                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$geminiApiKey")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.connectTimeout = 15000 
+                conn.readTimeout = 15000
+                conn.doOutput = true
+
+                val audioInline = JSONObject()
+                    .put("mimeType", "audio/wav")
+                    .put("data", base64Audio)
+                val audioPart = JSONObject().put("inlineData", audioInline)
+
+                val textPart = JSONObject().put("text", personaPrompt)
+
+                val partsArr = JSONArray().put(audioPart).put(textPart)
+                val contentObj = JSONObject().put("parts", partsArr)
+                val contentsArr = JSONArray().put(contentObj)
+
+                val genConfig = JSONObject()
+                    .put("maxOutputTokens", 150)
+                    .put("temperature", 0.7)
+
+                val payload = JSONObject()
+                    .put("contents", contentsArr)
+                    .put("generationConfig", genConfig)
+
+                conn.outputStream.use { os ->
+                    os.write(payload.toString().toByteArray(Charsets.UTF_8))
+                }
+
+                val responseCode = conn.responseCode
+                if (responseCode == 200) {
+                    val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
+                    val jsonResponse = JSONObject(responseStr)
+                    
+                    val rawAnswer = jsonResponse.getJSONArray("candidates")
+                        .getJSONObject(0)
+                        .getJSONObject("content")
+                        .getJSONArray("parts")
+                        .getJSONObject(0)
+                        .getString("text")
+
+                    val answer = rawAnswer.replace(Regex("[*#~]"), "").trim()
+
+                    withContext(Dispatchers.Main) {
+                        txtResponse.text = "Butki: \"$answer\""
+                        speakOut(answer)
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        isSpeaking = false
+                        neonVisualizer.setMode(0)
+                        txtStatus.text = "● API ERROR ($responseCode)"
+                        speakOut("Sorry Boss, audio processing mein error aaya.")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isSpeaking = false
+                    neonVisualizer.setMode(0)
+                    txtStatus.text = "● NETWORK ERROR"
+                    speakOut("Sorry Boss, connection mein kuch dikkat hai.")
+                }
+            }
+        }
+    }
+
+    private fun askButkiText(prompt: String) {
+        if (geminiApiKey.isEmpty()) return
+
+        isSpeaking = true
+        txtStatus.text = "● BUTKI IS THINKING..."
+        txtStatus.setTextColor(Color.parseColor("#FF007F"))
+        neonVisualizer.setMode(1)
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val personaPrompt = """
+                    You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
+                    CRITICAL RULE 1: Always address the user as "Boss" affectionately. 
+                    CRITICAL RULE 2: NEVER use emojis, asterisks, or special characters.
+                    CRITICAL RULE 3: Reply in natural conversational Hinglish/Gujarati (1-2 short sentences).
+                    User input: $prompt
                 """.trimIndent()
 
                 val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$geminiApiKey")
@@ -562,15 +602,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val contentObj = JSONObject().put("parts", partsArr)
                 val contentsArr = JSONArray().put(contentObj)
 
-                val thinkingConfig = JSONObject().put("thinkingBudget", 0)
-                val genConfig = JSONObject()
-                    .put("maxOutputTokens", 120)
-                    .put("temperature", 0.7)
-                    .put("thinkingConfig", thinkingConfig)
-
-                val payload = JSONObject()
-                    .put("contents", contentsArr)
-                    .put("generationConfig", genConfig)
+                val genConfig = JSONObject().put("maxOutputTokens", 120).put("temperature", 0.7)
+                val payload = JSONObject().put("contents", contentsArr).put("generationConfig", genConfig)
 
                 conn.outputStream.use { os ->
                     os.write(payload.toString().toByteArray(Charsets.UTF_8))
@@ -594,13 +627,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         speakOut(answer)
                     }
                 } else {
-                    val errorStr = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
                     withContext(Dispatchers.Main) {
                         isSpeaking = false
                         neonVisualizer.setMode(0)
-                        txtStatus.text = "● API ERROR ($responseCode)"
-                        txtResponse.text = "Error: $errorStr\n(Title 'BUTKI A.I.' par long-press karke nayi API key daalein)"
-                        speakOut("Sorry Boss, API mein kuch error aa raha hai.")
+                        txtStatus.text = "● API ERROR"
+                        speakOut("Sorry Boss, error aa gaya.")
                     }
                 }
             } catch (e: Exception) {
@@ -608,15 +639,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     isSpeaking = false
                     neonVisualizer.setMode(0)
                     txtStatus.text = "● NETWORK ERROR"
-                    txtResponse.text = "Error: ${e.localizedMessage}"
-                    speakOut("Sorry Boss, internet connection thoda slow lag raha hai.")
+                    speakOut("Sorry Boss, internet slow hai.")
                 }
             }
         }
     }
 
     private fun speakOut(text: String) {
-        stopSilentListening()
+        stopSeamlessListening()
         isSpeaking = true
         txtStatus.text = "● BUTKI IS SPEAKING..."
         txtStatus.setTextColor(Color.parseColor("#00FF9D"))
@@ -630,30 +660,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val hindiLocale = Locale("hi", "IN")
-            val result = tts.setLanguage(hindiLocale)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                tts.language = Locale.getDefault()
-            }
+            val locale = Locale("hi", "IN")
+            tts.setLanguage(locale)
 
             try {
                 val voices = tts.voices
                 if (voices != null) {
-                    var bestFemaleVoice: Voice? = null
+                    var bestVoice: Voice? = null
                     for (v in voices) {
-                        val name = v.name.lowercase()
-                        if (v.locale.language == "hi") {
-                            if (name.contains("female") || name.contains("hie") || name.contains("hia") || name.contains("wavenet-a") || name.contains("wavenet-d")) {
-                                bestFemaleVoice = v
-                                if (name.contains("network")) break
-                            }
+                        if (v.locale.language == "hi" && (v.name.lowercase().contains("female") || v.name.lowercase().contains("wavenet"))) {
+                            bestVoice = v
+                            break
                         }
                     }
-                    if (bestFemaleVoice != null) {
-                        tts.voice = bestFemaleVoice
-                    }
+                    if (bestVoice != null) tts.voice = bestVoice
                 }
-            } catch (e: Exception) { }
+            } catch (e: Exception) {}
 
             tts.setPitch(1.05f)   
             tts.setSpeechRate(0.95f) 
@@ -667,11 +689,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
                         
-                        // 🔴 HANDS-FREE AUTO LISTEN: Jab Butki bolna khatam kare, toh bina beep ke wapas sunna shuru kare!
+                        // 🔴 AUTO CONTINUOUS LISTENING: Butki ke bolte hi agla audio sunna shuru!
                         if (isContinuousMode) {
                             mainHandler.postDelayed({
-                                startSilentListening()
-                            }, 300)
+                                startSeamlessListening()
+                            }, 400)
                         } else {
                             txtStatus.text = "● READY! TAP 'B' TO SPEAK"
                         }
@@ -691,8 +713,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
         mainHandler.removeCallbacksAndMessages(null)
-        unmuteSystemBeep()
-        speechRecognizer?.destroy()
+        stopSeamlessListening()
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         super.onDestroy()
     }
