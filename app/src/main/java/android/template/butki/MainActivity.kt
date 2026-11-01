@@ -13,6 +13,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.*
 import android.graphics.drawable.GradientDrawable
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -21,6 +22,7 @@ import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -40,6 +42,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.cos
@@ -47,7 +53,7 @@ import kotlin.math.sin
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
-    private lateinit var tts: TextToSpeech
+    private lateinit var tts: TextToSpeech // Fallback ke liye rakha hai
     private var generativeModel: GenerativeModel? = null 
     private lateinit var sharedPreferences: SharedPreferences
 
@@ -58,6 +64,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isSpeaking = false
+    private var mediaPlayer: MediaPlayer? = null
 
     private var savedSchedule: String = "Abhi tak koi schedule set nahi kiya hai aapne."
     private var savedTasks: MutableList<String> = mutableListOf()
@@ -148,7 +155,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .show()
     }
 
-    // 🔴 OFFICIAL GEMINI SDK SETUP (STABLE & FAST)
     private fun setupGeminiAI(apiKey: String) {
         generativeModel = GenerativeModel(
             modelName = "gemini-1.5-flash",
@@ -190,7 +196,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
             gravity = Gravity.CENTER
             
-            // 🔴 Long-press on title to reset Gemini API key anytime
             setOnLongClickListener {
                 sharedPreferences.edit().remove("GEMINI_API_KEY").apply()
                 showApiKeyDialog()
@@ -216,8 +221,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             layoutParams = RelativeLayout.LayoutParams(650, 650).apply {
                 addRule(RelativeLayout.CENTER_IN_PARENT)
             }
-            // 🔴 MIC FIX: 250ms delay so speaker releases audio before mic opens
             setOnClickListener {
+                if (mediaPlayer?.isPlaying == true) {
+                    mediaPlayer?.stop()
+                    mediaPlayer?.release()
+                    mediaPlayer = null
+                }
                 if (::tts.isInitialized) tts.stop()
                 isSpeaking = false
                 txtStatus.text = "● OPENING MIC..."
@@ -459,12 +468,77 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    // 🔴 HIGH QUALITY GOOGLE CLOUD NEURAL2 FEMALE VOICE IMPLEMENTATION
     private fun speakOut(text: String) {
         isSpeaking = true
         txtStatus.text = "● BUTKI IS SPEAKING..."
         neonVisualizer.setMode(2)
         neonVisualizer.updateVoiceLevel(8f)
 
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val apiKey = sharedPreferences.getString("GEMINI_API_KEY", "") ?: ""
+                val urlString = "https://texttospeech.googleapis.com/v1/text:synthesize?key=$apiKey"
+                val url = URL(urlString)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                conn.doOutput = true
+
+                val escapedText = text.replace("\"", "\\\"").replace("\n", " ")
+                val jsonInputString = """
+                    {
+                      "input": {"text": "$escapedText"},
+                      "voice": {"languageCode": "hi-IN", "name": "hi-IN-Neural2-A", "ssmlGender": "FEMALE"},
+                      "audioConfig": {"audioEncoding": "MP3", "speakingRate": 0.98}
+                    }
+                """.trimIndent()
+
+                conn.outputStream.use { os ->
+                    val input = jsonInputString.byteInputStream(Charsets.UTF_8)
+                    input.copyTo(os)
+                }
+
+                if (conn.responseCode == 200) {
+                    val responseStream = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(responseStream)
+                    val audioContent = json.getString("audioContent")
+                    val audioBytes = Base64.decode(audioContent, Base64.DEFAULT)
+
+                    val tempFile = File.createTempFile("butki_voice", ".mp3", cacheDir)
+                    tempFile.writeBytes(audioBytes)
+
+                    withContext(Dispatchers.Main) {
+                        mediaPlayer?.release()
+                        mediaPlayer = MediaPlayer().apply {
+                            setDataSource(tempFile.absolutePath)
+                            prepare()
+                            start()
+                            setOnCompletionListener {
+                                release()
+                                tempFile.delete()
+                                neonVisualizer.setMode(0)
+                                neonVisualizer.updateVoiceLevel(1f)
+                                isSpeaking = false
+                                txtStatus.text = "● READY! TAP 'B' TO SPEAK"
+                            }
+                        }
+                    }
+                } else {
+                    // Agar Cloud TTS fail ho toh offline Android TTS par fallback karein
+                    withContext(Dispatchers.Main) {
+                        fallbackToDefaultTts(text)
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    fallbackToDefaultTts(text)
+                }
+            }
+        }
+    }
+
+    private fun fallbackToDefaultTts(text: String) {
         val params = Bundle()
         params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "BUTKI_VOICE")
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "BUTKI_VOICE")
@@ -476,8 +550,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                 tts.language = Locale.getDefault()
             }
-
-            // 🔴 SOFT & CARING FEMALE VOICE TUNING
             tts.setPitch(1.10f)   
             tts.setSpeechRate(0.92f) 
 
@@ -506,6 +578,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
         mainHandler.removeCallbacksAndMessages(null)
+        mediaPlayer?.release()
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         super.onDestroy()
     }
