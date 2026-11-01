@@ -46,7 +46,6 @@ class VoiceAssistantManager(
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 // Lambe gaps (silence) ko handle karne ke liye time badha diya hai (6 seconds)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 6000L)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_CORRESPONDING_SILENCE_LENGTH_MILLIS, 6000L)
                 putExtra(RecognizerIntent.EXTRA_PROMPT, "Boliye Boss, Butki sun rahi hai...")
             }
             @Suppress("DEPRECATION")
