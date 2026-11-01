@@ -15,10 +15,7 @@ import android.graphics.*
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.AudioManager
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -73,11 +70,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val sampleRate = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-    private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat) * 2
+    
+    // ✅ Buffer size ko stable rakha hai (* 4)
+    private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat) * 4
 
-    // ✅ Threashold ko 650 se 150 kar diya gaya hai taaki aawaz jaldi pick ho
-    private val silenceThreshold = 150.0 
-    private val maxSilenceMillis = 1200L 
+    // ✅ Threshold ko aur kam kiya (80) aur gap ko 1.5 seconds kar diya
+    private val silenceThreshold = 80.0 
+    private val maxSilenceMillis = 1500L 
 
     private lateinit var txtResponse: TextView
     private lateinit var txtStatus: TextView
@@ -167,18 +166,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (::tts.isInitialized) tts.stop()
                 isSpeaking = false
 
+                // ✅ VOICE_COMMUNICATION ki jagah MIC use kiya hai
                 audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    MediaRecorder.AudioSource.MIC, 
                     sampleRate,
                     channelConfig,
                     audioFormat,
                     bufferSize
                 )
 
-                val sessionId = audioRecord?.audioSessionId ?: 0
-                if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(sessionId)?.enabled = true
-                if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(sessionId)?.enabled = true
-
+                // ✅ Android filters ko hata diya gaya hai taki awaaz cut na ho
+                
                 audioRecord?.startRecording()
                 isRecording = true
 
@@ -771,7 +769,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val inner = baseR * 1.06f
                 val outer = inner + (voicePulse * 6f) * abs(sin(rad * 3)).toFloat() + 12f
                 canvas.drawLine(cx + inner * cos(rad).toFloat(), cy + inner * sin(rad).toFloat(),
-                    cx + outer * cos(rad).toFloat(), cy + outer * sin(rad).toFloat(), if (i % 2 == 0) cyanPaint else pinkPaint)
+                    cx + outer * cos(rad).toFloat(), cy + outer * outer * sin(rad).toFloat(), if (i % 2 == 0) cyanPaint else pinkPaint)
             }
             canvas.drawText("B", cx, cy - ((textPaint.descent() + textPaint.ascent()) / 2), textPaint)
         }
