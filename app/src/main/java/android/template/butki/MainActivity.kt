@@ -65,7 +65,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var sharedPreferences: SharedPreferences
     private var geminiApiKey: String = ""
 
-    // 🔴 100% SILENT & REAL-TIME GEMINI AUDIO LISTENER (NO BEEP, NO SPEECHRECOGNIZER)
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
     private var recordingJob: Job? = null
@@ -76,8 +75,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat) * 2
 
-    private val silenceThreshold = 650.0 // Aawaz ki sensitivity
-    private val maxSilenceMillis = 1200L // 1.2 second chup rehne par sentence complete
+    private val silenceThreshold = 650.0 
+    private val maxSilenceMillis = 1200L 
 
     private lateinit var txtResponse: TextView
     private lateinit var txtStatus: TextView
@@ -155,7 +154,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    // 🔴 RAW AUDIO AUDIO-RECORD ENGINE (ZERO BEEP, DIRECT GEMINI AUDIO INPUT)
     @SuppressLint("MissingPermission")
     private fun startSeamlessListening() {
         if (isRecording) return
@@ -185,7 +183,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
                 txtStatus.text = "● LISTENING... (SHUDH SUN RAHI HOON)"
                 txtStatus.setTextColor(Color.parseColor("#00F0FF"))
-                neonVisualizer.setMode(3) // Mode 3 = Live Mic Pulse
+                neonVisualizer.setMode(3) 
 
                 recordingJob = CoroutineScope(Dispatchers.IO).launch {
                     val buffer = ShortArray(bufferSize / 2)
@@ -198,7 +196,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (readCount > 0) {
                             var sum = 0.0
                             for (i in 0 until readCount) {
-                                sum += buffer[i] * buffer[i]
+                                sum += buffer[i].toDouble() * buffer[i].toDouble()
                             }
                             val rms = sqrt(sum / readCount)
 
@@ -227,7 +225,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                     val finalPcmBytes = speechStream.toByteArray()
                                     speechStream.reset()
 
-                                    if (finalPcmBytes.size > 3200) { // Sirf tabhi bhejo jab aawaz lambi ho
+                                    if (finalPcmBytes.size > 3200) { 
                                         stopSeamlessListening()
                                         val wavBytes = pcmToWav(finalPcmBytes)
                                         withContext(Dispatchers.Main) {
@@ -271,12 +269,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         output.writeBytes("WAVE")
         output.writeBytes("fmt ")
         output.writeInt(Integer.reverseBytes(16))
-        output.writeShort(java.lang.Short.reverseBytes(1))
-        output.writeShort(java.lang.Short.reverseBytes(channels))
+        output.writeShort(java.lang.Short.reverseBytes(1.toShort()).toInt()) 
+        output.writeShort(java.lang.Short.reverseBytes(channels).toInt())       
         output.writeInt(Integer.reverseBytes(sampleRate))
         output.writeInt(Integer.reverseBytes(byteRate.toInt()))
-        output.writeShort(java.lang.Short.reverseBytes((channels * (bitDepth / 8)).toShort()))
-        output.writeShort(java.lang.Short.reverseBytes(bitDepth))
+        output.writeShort(java.lang.Short.reverseBytes((channels * (bitDepth / 8)).toShort()).toInt()) 
+        output.writeShort(java.lang.Short.reverseBytes(bitDepth).toInt())     
         output.writeBytes("data")
         output.writeInt(Integer.reverseBytes(totalAudioLen.toInt()))
         output.write(pcmBytes)
@@ -458,8 +456,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 cornerRadius = 25f
             }
             layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                RelativeLayout.LayoutParams.WRAP_CONTENT,
+                RelativeLayout.LayoutParams.WRAP_CONTENT
             ).apply { leftMargin = 20 }
             
             setOnClickListener {
@@ -689,7 +687,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         neonVisualizer.updateVoiceLevel(1f)
                         isSpeaking = false
                         
-                        // 🔴 AUTO CONTINUOUS LISTENING: Butki ke bolte hi agla audio sunna shuru!
                         if (isContinuousMode) {
                             mainHandler.postDelayed({
                                 startSeamlessListening()
