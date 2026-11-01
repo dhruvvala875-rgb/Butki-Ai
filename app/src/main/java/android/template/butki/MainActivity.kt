@@ -75,7 +75,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat) * 2
 
-    private val silenceThreshold = 650.0 
+    // ✅ Threashold ko 650 se 150 kar diya gaya hai taaki aawaz jaldi pick ho
+    private val silenceThreshold = 150.0 
     private val maxSilenceMillis = 1200L 
 
     private lateinit var txtResponse: TextView
