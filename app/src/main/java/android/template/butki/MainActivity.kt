@@ -71,10 +71,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     
-    // ✅ Buffer size ko stable rakha hai (* 4)
     private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat) * 4
-
-    // ✅ Threshold ko aur kam kiya (80) aur gap ko 1.5 seconds kar diya
     private val silenceThreshold = 80.0 
     private val maxSilenceMillis = 1500L 
 
@@ -87,8 +84,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var isSpeaking = false
 
     private var savedSchedule: String = "Abhi tak koi schedule set nahi kiya hai aapne."
-    private var savedTasks: MutableList<String> = mutableListOf()
 
+    // Notifications variables
     private var isAskingNotificationPermission = false
     private var isAskingToReply = false
     private var isWaitingForReplyText = false
@@ -109,12 +106,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     pendingNotificationText = text
                     canReplyToCurrentNotification = canReply
                     
-                    isAskingNotificationPermission = true
-                    isAskingToReply = false
-                    isWaitingForReplyText = false
-                    
                     val promptText = "Boss, $title ki taraf se ek message aaya hai. Kya main padh ke sunau?"
-                    txtResponse.text = "● Notification from $title\nSay Haan or Nahi."
+                    txtResponse.text = "> SYSTEM OVERRIDE: Notification from $title\n> AWAITING COMMAND (Haan/Nahi)..."
                     speakOut(promptText)
                 }
             }
@@ -124,7 +117,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.statusBarColor = Color.parseColor("#05050A")
+        
+        // Transparent Status Bar
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.statusBarColor = Color.parseColor("#030308")
+        }
 
         sharedPreferences = getSharedPreferences("ButkiPrefs", Context.MODE_PRIVATE)
 
@@ -157,16 +154,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     @SuppressLint("MissingPermission")
     private fun startSeamlessListening() {
         if (isRecording) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            return
-        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
 
         mainHandler.post {
             try {
                 if (::tts.isInitialized) tts.stop()
                 isSpeaking = false
 
-                // ✅ VOICE_COMMUNICATION ki jagah MIC use kiya hai
                 audioRecord = AudioRecord(
                     MediaRecorder.AudioSource.MIC, 
                     sampleRate,
@@ -174,13 +168,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     audioFormat,
                     bufferSize
                 )
-
-                // ✅ Android filters ko hata diya gaya hai taki awaaz cut na ho
                 
                 audioRecord?.startRecording()
                 isRecording = true
 
-                txtStatus.text = "● LISTENING... (SHUDH SUN RAHI HOON)"
+                txtStatus.text = "[ SYS: AUDIO LINK ESTABLISHED ]"
                 txtStatus.setTextColor(Color.parseColor("#00F0FF"))
                 neonVisualizer.setMode(3) 
 
@@ -283,16 +275,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showApiKeyDialog() {
         val input = EditText(this).apply {
-            hint = "Paste Gemini API Key here"
+            hint = "Enter Authentication Key (Gemini API)"
             setPadding(40, 40, 40, 40)
+            typeface = Typeface.MONOSPACE
         }
 
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Setup Gemini AI")
-            .setMessage("Boss, please enter your Gemini API Key to activate my brain:")
+            .setTitle("SYSTEM AUTHENTICATION")
+            .setMessage("Boss, please enter your Gemini API Key to initialize Neural Core:")
             .setView(input)
             .setCancelable(false)
-            .setPositiveButton("Save & Start") { _, _ ->
+            .setPositiveButton("INITIALIZE") { _, _ ->
                 val key = input.text.toString().trim()
                 if (key.isNotEmpty()) {
                     sharedPreferences.edit().putString("GEMINI_API_KEY", key).apply()
@@ -310,15 +303,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
         val enabled = flat != null && flat.contains(cn.flattenToString())
         if (!enabled) {
-            txtResponse.text = "Boss, Notifications padhne ke liye 'Notification Access' allow kijiye."
+            txtResponse.text = "> ERROR: Notification stream blocked. Grant access to proceed."
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
     }
 
     private fun setupFuturisticUI() {
         val root = RelativeLayout(this).apply {
-            setBackgroundColor(Color.parseColor("#05050C"))
-            setPadding(40, 70, 40, 40)
+            // Futuristic Dark Gradient Background
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.parseColor("#020205"), Color.parseColor("#0A0B1A"), Color.parseColor("#020205"))
+            )
+            setPadding(40, 80, 40, 40)
         }
 
         val headerLayout = LinearLayout(this).apply {
@@ -332,12 +329,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val titleText = TextView(this).apply {
-            text = "B U T K I   A.I."
-            textSize = 28f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#00F0FF"))
-            setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
+            text = "BUTKI // A.I. NEXUS"
+            textSize = 26f
+            typeface = Typeface.MONOSPACE
+            setTextColor(Color.parseColor("#E0E0FF"))
+            setShadowLayer(30f, 0f, 0f, Color.parseColor("#00F0FF"))
             gravity = Gravity.CENTER
+            letterSpacing = 0.15f
             
             setOnLongClickListener {
                 sharedPreferences.edit().remove("GEMINI_API_KEY").apply()
@@ -347,13 +345,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtStatus = TextView(this).apply {
-            text = "● READY! TAP 'B' TO SPEAK"
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
+            text = "[ STATUS : STANDBY ]"
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
             setTextColor(Color.parseColor("#00FF9D"))
-            setShadowLayer(15f, 0f, 0f, Color.parseColor("#00FF9D"))
+            setShadowLayer(10f, 0f, 0f, Color.parseColor("#00FF9D"))
             gravity = Gravity.CENTER
-            setPadding(0, 15, 0, 0)
+            letterSpacing = 0.1f
+            setPadding(0, 20, 0, 0)
         }
 
         headerLayout.addView(titleText)
@@ -361,14 +360,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         root.addView(headerLayout)
 
         neonVisualizer = NeonOrbView(this).apply {
-            layoutParams = RelativeLayout.LayoutParams(650, 650).apply {
+            layoutParams = RelativeLayout.LayoutParams(800, 800).apply {
                 addRule(RelativeLayout.CENTER_IN_PARENT)
             }
             setOnClickListener {
                 if (isRecording) {
                     isContinuousMode = false
                     stopSeamlessListening()
-                    txtStatus.text = "● PAUSED. TAP 'B' TO START"
+                    txtStatus.text = "[ SYS: CONNECTION PAUSED ]"
+                    txtStatus.setTextColor(Color.parseColor("#FF4444"))
                 } else {
                     isContinuousMode = true
                     if (::tts.isInitialized) tts.stop()
@@ -379,16 +379,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         root.addView(neonVisualizer)
 
+        // Glassmorphism Console Background
         val cardBg = GradientDrawable().apply {
-            setColor(Color.parseColor("#121225"))
-            cornerRadius = 40f
-            setStroke(3, Color.parseColor("#00F0FF"))
+            setColor(Color.parseColor("#40000000")) // Semi-transparent black
+            cornerRadius = 30f
+            setStroke(2, Color.parseColor("#8000F0FF")) // Glow border
         }
 
         val consoleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = cardBg
-            setPadding(40, 35, 40, 35)
+            setPadding(40, 40, 40, 40)
             layoutParams = RelativeLayout.LayoutParams(
                 RelativeLayout.LayoutParams.MATCH_PARENT,
                 RelativeLayout.LayoutParams.WRAP_CONTENT
@@ -398,32 +399,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val streamLabel = TextView(this).apply {
-            text = "DIRECT AUDIO NEURAL LIVE STREAM"
-            textSize = 11f
-            typeface = Typeface.DEFAULT_BOLD
+            text = "► TERMINAL DATA STREAM"
+            textSize = 10f
+            typeface = Typeface.MONOSPACE
             setTextColor(Color.parseColor("#00F0FF"))
-            setPadding(0, 0, 0, 12)
+            letterSpacing = 0.1f
+            setPadding(0, 0, 0, 15)
         }
 
         val scrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                220
+                250
             )
         }
 
         txtResponse = TextView(this).apply {
-            text = "System Ready Boss!\n1. Tap 'B' for zero-beep direct audio chat.\n2. Or type in box and hit SEND!"
-            textSize = 15f
-            setTextColor(Color.parseColor("#F5F5FF"))
-            setLineSpacing(8f, 1.0f)
+            text = "> Core Initialized...\n> Welcome back, Boss.\n> Tap the Hologram to initiate audio link."
+            textSize = 14f
+            typeface = Typeface.MONOSPACE
+            setTextColor(Color.parseColor("#D4D4F0"))
+            setLineSpacing(10f, 1.0f)
         }
         scrollView.addView(txtResponse)
 
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 20, 0, 0)
+            setPadding(0, 25, 0, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -431,28 +434,30 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         val editBg = GradientDrawable().apply {
-            setColor(Color.parseColor("#1E1E38"))
-            cornerRadius = 25f
+            setColor(Color.parseColor("#20000000"))
+            cornerRadius = 15f
             setStroke(2, Color.parseColor("#FF007F"))
         }
 
         inputMessage = EditText(this).apply {
-            hint = "Yahan likh kar bhi baat kar sakte hain..."
-            setHintTextColor(Color.parseColor("#8888AA"))
+            hint = "Enter manual override command..."
+            setHintTextColor(Color.parseColor("#666688"))
             setTextColor(Color.WHITE)
-            textSize = 14f
+            textSize = 13f
+            typeface = Typeface.MONOSPACE
             background = editBg
-            setPadding(30, 20, 30, 20)
+            setPadding(35, 25, 35, 25)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
         val btnSend = Button(this).apply {
-            text = "SEND"
-            setTextColor(Color.BLACK)
+            text = "EXEC"
+            setTextColor(Color.parseColor("#050510"))
             typeface = Typeface.DEFAULT_BOLD
+            textSize = 12f
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#00F0FF"))
-                cornerRadius = 25f
+                cornerRadius = 15f
             }
             layoutParams = LinearLayout.LayoutParams(
                 RelativeLayout.LayoutParams.WRAP_CONTENT,
@@ -484,7 +489,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (geminiApiKey.isEmpty()) return
 
         isSpeaking = true
-        txtStatus.text = "● BUTKI IS LISTENING & THINKING..."
+        txtStatus.text = "[ SYS: PROCESSING AUDIO... ]"
         txtStatus.setTextColor(Color.parseColor("#FF007F"))
         neonVisualizer.setMode(1)
 
@@ -496,7 +501,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     You are Butki, a deeply loving, sweet, caring, and playfully naughty female AI companion/girlfriend. 
                     CRITICAL RULE 1: Always address the user as "Boss" affectionately. 
                     CRITICAL RULE 2: NEVER use emojis, asterisks, or special characters.
-                    CRITICAL RULE 3: Reply in natural conversational Hinglish/Gujarati/Hindi (1-2 short sentences). Understand user's spoken audio directly without spelling errors.
+                    CRITICAL RULE 3: Reply in natural conversational Hinglish/Gujarati/Hindi (1-2 short sentences).
                     User's Saved Schedule: "$savedSchedule"
                 """.trimIndent()
 
@@ -508,61 +513,42 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 conn.readTimeout = 15000
                 conn.doOutput = true
 
-                val audioInline = JSONObject()
-                    .put("mimeType", "audio/wav")
-                    .put("data", base64Audio)
+                val audioInline = JSONObject().put("mimeType", "audio/wav").put("data", base64Audio)
                 val audioPart = JSONObject().put("inlineData", audioInline)
-
                 val textPart = JSONObject().put("text", personaPrompt)
-
                 val partsArr = JSONArray().put(audioPart).put(textPart)
                 val contentObj = JSONObject().put("parts", partsArr)
                 val contentsArr = JSONArray().put(contentObj)
-
-                val genConfig = JSONObject()
-                    .put("maxOutputTokens", 150)
-                    .put("temperature", 0.7)
-
-                val payload = JSONObject()
-                    .put("contents", contentsArr)
-                    .put("generationConfig", genConfig)
+                val genConfig = JSONObject().put("maxOutputTokens", 150).put("temperature", 0.7)
+                val payload = JSONObject().put("contents", contentsArr).put("generationConfig", genConfig)
 
                 conn.outputStream.use { os ->
                     os.write(payload.toString().toByteArray(Charsets.UTF_8))
                 }
 
-                val responseCode = conn.responseCode
-                if (responseCode == 200) {
+                if (conn.responseCode == 200) {
                     val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
                     val jsonResponse = JSONObject(responseStr)
-                    
-                    val rawAnswer = jsonResponse.getJSONArray("candidates")
-                        .getJSONObject(0)
-                        .getJSONObject("content")
-                        .getJSONArray("parts")
-                        .getJSONObject(0)
-                        .getString("text")
-
+                    val rawAnswer = jsonResponse.getJSONArray("candidates").getJSONObject(0)
+                        .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
                     val answer = rawAnswer.replace(Regex("[*#~]"), "").trim()
 
                     withContext(Dispatchers.Main) {
-                        txtResponse.text = "Butki: \"$answer\""
+                        txtResponse.text = "> Butki:\n$answer"
                         speakOut(answer)
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        isSpeaking = false
-                        neonVisualizer.setMode(0)
-                        txtStatus.text = "● API ERROR ($responseCode)"
+                        isSpeaking = false; neonVisualizer.setMode(0)
+                        txtStatus.text = "[ ERR: API FAILURE ]"
                         speakOut("Sorry Boss, audio processing mein error aaya.")
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    isSpeaking = false
-                    neonVisualizer.setMode(0)
-                    txtStatus.text = "● NETWORK ERROR"
-                    speakOut("Sorry Boss, connection mein kuch dikkat hai.")
+                    isSpeaking = false; neonVisualizer.setMode(0)
+                    txtStatus.text = "[ ERR: NETWORK DISCONNECT ]"
+                    speakOut("Sorry Boss, connection mein kuch दिक्कत hai.")
                 }
             }
         }
@@ -570,9 +556,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun askButkiText(prompt: String) {
         if (geminiApiKey.isEmpty()) return
-
         isSpeaking = true
-        txtStatus.text = "● BUTKI IS THINKING..."
+        txtStatus.text = "[ SYS: QUERY PROCESSING... ]"
         txtStatus.setTextColor(Color.parseColor("#FF007F"))
         neonVisualizer.setMode(1)
 
@@ -590,52 +575,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.connectTimeout = 10000 
-                conn.readTimeout = 10000
-                conn.doOutput = true
+                conn.connectTimeout = 10000; conn.doOutput = true
 
-                val partObj = JSONObject().put("text", personaPrompt)
-                val partsArr = JSONArray().put(partObj)
-                val contentObj = JSONObject().put("parts", partsArr)
-                val contentsArr = JSONArray().put(contentObj)
-
+                val partsArr = JSONArray().put(JSONObject().put("text", personaPrompt))
+                val contentsArr = JSONArray().put(JSONObject().put("parts", partsArr))
                 val genConfig = JSONObject().put("maxOutputTokens", 120).put("temperature", 0.7)
                 val payload = JSONObject().put("contents", contentsArr).put("generationConfig", genConfig)
 
-                conn.outputStream.use { os ->
-                    os.write(payload.toString().toByteArray(Charsets.UTF_8))
-                }
+                conn.outputStream.use { os -> os.write(payload.toString().toByteArray(Charsets.UTF_8)) }
 
-                val responseCode = conn.responseCode
-                if (responseCode == 200) {
+                if (conn.responseCode == 200) {
                     val responseStr = conn.inputStream.bufferedReader().use { it.readText() }
-                    val jsonResponse = JSONObject(responseStr)
-                    val rawAnswer = jsonResponse.getJSONArray("candidates")
-                        .getJSONObject(0)
-                        .getJSONObject("content")
-                        .getJSONArray("parts")
-                        .getJSONObject(0)
-                        .getString("text")
-
-                    val answer = rawAnswer.replace(Regex("[*#~]"), "").trim()
+                    val answer = JSONObject(responseStr).getJSONArray("candidates").getJSONObject(0)
+                        .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                        .replace(Regex("[*#~]"), "").trim()
 
                     withContext(Dispatchers.Main) {
-                        txtResponse.text = "Boss: \"$prompt\"\n\nButki: \"$answer\""
+                        txtResponse.text = "> Boss: $prompt\n\n> Butki: $answer"
                         speakOut(answer)
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        isSpeaking = false
-                        neonVisualizer.setMode(0)
-                        txtStatus.text = "● API ERROR"
+                        isSpeaking = false; neonVisualizer.setMode(0); txtStatus.text = "[ ERR: API ERROR ]"
                         speakOut("Sorry Boss, error aa gaya.")
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    isSpeaking = false
-                    neonVisualizer.setMode(0)
-                    txtStatus.text = "● NETWORK ERROR"
+                    isSpeaking = false; neonVisualizer.setMode(0); txtStatus.text = "[ ERR: OFFLINE ]"
                     speakOut("Sorry Boss, internet slow hai.")
                 }
             }
@@ -645,62 +612,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun speakOut(text: String) {
         stopSeamlessListening()
         isSpeaking = true
-        txtStatus.text = "● BUTKI IS SPEAKING..."
+        txtStatus.text = "[ SYS: AUDIO TRANSMITTING ]"
         txtStatus.setTextColor(Color.parseColor("#00FF9D"))
         neonVisualizer.setMode(2)
         neonVisualizer.updateVoiceLevel(8f)
 
-        val params = Bundle()
-        params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "BUTKI_VOICE")
+        val params = Bundle().apply { putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "BUTKI_VOICE") }
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "BUTKI_VOICE")
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val locale = Locale("hi", "IN")
-            tts.setLanguage(locale)
-
+            tts.setLanguage(Locale("hi", "IN"))
             try {
-                val voices = tts.voices
-                if (voices != null) {
-                    var bestVoice: Voice? = null
-                    for (v in voices) {
-                        if (v.locale.language == "hi" && (v.name.lowercase().contains("female") || v.name.lowercase().contains("wavenet"))) {
-                            bestVoice = v
-                            break
-                        }
-                    }
-                    if (bestVoice != null) tts.voice = bestVoice
-                }
+                tts.voices?.firstOrNull { it.locale.language == "hi" && (it.name.lowercase().contains("female") || it.name.lowercase().contains("wavenet")) }?.let { tts.voice = it }
             } catch (e: Exception) {}
-
-            tts.setPitch(1.05f)   
-            tts.setSpeechRate(0.95f) 
+            tts.setPitch(1.05f); tts.setSpeechRate(0.95f)
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) { isSpeaking = true }
-
                 override fun onDone(utteranceId: String?) {
                     mainHandler.post {
-                        neonVisualizer.setMode(0)
-                        neonVisualizer.updateVoiceLevel(1f)
-                        isSpeaking = false
-                        
-                        if (isContinuousMode) {
-                            mainHandler.postDelayed({
-                                startSeamlessListening()
-                            }, 400)
-                        } else {
-                            txtStatus.text = "● READY! TAP 'B' TO SPEAK"
-                        }
+                        neonVisualizer.setMode(0); neonVisualizer.updateVoiceLevel(1f); isSpeaking = false
+                        if (isContinuousMode) mainHandler.postDelayed({ startSeamlessListening() }, 400)
+                        else txtStatus.text = "[ STATUS : STANDBY ]"
                     }
                 }
-
                 override fun onError(utteranceId: String?) {
-                    mainHandler.post {
-                        isSpeaking = false
-                        txtStatus.text = "● READY! TAP 'B' TO SPEAK"
-                    }
+                    mainHandler.post { isSpeaking = false; txtStatus.text = "[ STATUS : STANDBY ]" }
                 }
             })
         }
@@ -708,38 +647,44 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         try { unregisterReceiver(notificationReceiver) } catch (e: Exception) {}
-        mainHandler.removeCallbacksAndMessages(null)
-        stopSeamlessListening()
+        mainHandler.removeCallbacksAndMessages(null); stopSeamlessListening()
         if (::tts.isInitialized) { tts.stop(); tts.shutdown() }
         super.onDestroy()
     }
 
+    // ==========================================
+    // 🔥 NEW FUTURISTIC HOLOGRAPHIC UI CORE 🔥
+    // ==========================================
     class NeonOrbView(context: Context) : View(context) {
-        private val cyanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 6f; color = Color.parseColor("#00F0FF")
-            setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
+        private val glowCyan = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 4f; color = Color.parseColor("#00F0FF")
+            setShadowLayer(20f, 0f, 0f, Color.parseColor("#00F0FF"))
         }
-        private val pinkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = 8f; color = Color.parseColor("#FF007F")
-            setShadowLayer(30f, 0f, 0f, Color.parseColor("#FF007F"))
+        private val dashPink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 6f; color = Color.parseColor("#FF007F")
+            pathEffect = DashPathEffect(floatArrayOf(25f, 20f), 0f)
+            setShadowLayer(15f, 0f, 0f, Color.parseColor("#FF007F"))
         }
-        private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL; color = Color.parseColor("#1800F0FF")
+        private val coreGlow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL; color = Color.parseColor("#2500F0FF")
         }
         private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE; textSize = 110f; typeface = Typeface.DEFAULT_BOLD; textAlign = Paint.Align.CENTER
-            setShadowLayer(30f, 0f, 0f, Color.parseColor("#FF007F"))
+            color = Color.WHITE; textSize = 90f; typeface = Typeface.MONOSPACE; textAlign = Paint.Align.CENTER
+            setShadowLayer(25f, 0f, 0f, Color.parseColor("#00F0FF"))
         }
 
-        private var angle = 0f; private var voicePulse = 1f; private var mode = 0; private val rect = RectF()
+        private var angle = 0f
+        private var voicePulse = 1f
+        private var mode = 0
+        private val rectF = RectF()
 
         init {
             setLayerType(LAYER_TYPE_SOFTWARE, null)
             ValueAnimator.ofFloat(0f, 360f).apply {
-                duration = 3500; repeatCount = ValueAnimator.INFINITE; interpolator = LinearInterpolator()
+                duration = 4000; repeatCount = ValueAnimator.INFINITE; interpolator = LinearInterpolator()
                 addUpdateListener {
                     angle = it.animatedValue as Float
-                    if (mode == 2) voicePulse = 4f + 5f * sin(Math.toRadians(angle.toDouble() * 4)).toFloat()
+                    if (mode == 2) voicePulse = 4f + 6f * sin(Math.toRadians(angle.toDouble() * 6)).toFloat()
                     invalidate()
                 }
                 start()
@@ -751,26 +696,47 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val cx = width / 2f; val cy = height / 2f
-            val baseR = (width.coerceAtMost(height) / 3.2f) + (voicePulse * 8f)
-            canvas.drawCircle(cx, cy, baseR * 0.72f, corePaint)
-            rect.set(cx - baseR, cy - baseR, cx + baseR, cy + baseR)
-            canvas.drawArc(rect, angle, 75f, false, cyanPaint)
-            canvas.drawArc(rect, angle + 120f, 75f, false, cyanPaint)
-            canvas.drawArc(rect, angle + 240f, 75f, false, cyanPaint)
+            val cx = width / 2f
+            val cy = height / 2f
+            val baseRadius = (width.coerceAtMost(height) / 3.5f) + (voicePulse * 6f)
 
-            val r2 = baseR * 0.84f
-            rect.set(cx - r2, cy - r2, cx + r2, cy + r2)
-            canvas.drawArc(rect, -angle * 1.4f, 110f, false, pinkPaint)
-            canvas.drawArc(rect, -angle * 1.4f + 180f, 110f, false, pinkPaint)
+            // Center Pulsing Core
+            canvas.drawCircle(cx, cy, baseRadius * 0.5f, coreGlow)
+            
+            // Inner Rotating Dashed Ring (Pink)
+            rectF.set(cx - baseRadius * 0.8f, cy - baseRadius * 0.8f, cx + baseRadius * 0.8f, cy + baseRadius * 0.8f)
+            canvas.save()
+            canvas.rotate(angle * 1.5f, cx, cy)
+            canvas.drawArc(rectF, 0f, 360f, false, dashPink)
+            canvas.restore()
 
-            for (i in 0 until 24) {
-                val rad = Math.toRadians((i * 15 + angle).toDouble())
-                val inner = baseR * 1.06f
-                val outer = inner + (voicePulse * 6f) * abs(sin(rad * 3)).toFloat() + 12f
-                canvas.drawLine(cx + inner * cos(rad).toFloat(), cy + inner * sin(rad).toFloat(),
-                    cx + outer * cos(rad).toFloat(), cy + outer * outer * sin(rad).toFloat(), if (i % 2 == 0) cyanPaint else pinkPaint)
+            // Middle Segmented Radar (Cyan)
+            rectF.set(cx - baseRadius, cy - baseRadius, cx + baseRadius, cy + baseRadius)
+            canvas.drawArc(rectF, -angle, 60f, false, glowCyan)
+            canvas.drawArc(rectF, -angle + 120f, 60f, false, glowCyan)
+            canvas.drawArc(rectF, -angle + 240f, 60f, false, glowCyan)
+
+            // Outer Technical Brackets (Cyan)
+            val outRadius = baseRadius * 1.25f
+            rectF.set(cx - outRadius, cy - outRadius, cx + outRadius, cy + outRadius)
+            canvas.drawArc(rectF, angle * 0.8f, 30f, false, glowCyan)
+            canvas.drawArc(rectF, angle * 0.8f + 180f, 30f, false, glowCyan)
+
+            // Audio Wave Spikes (Outer Edge)
+            if (voicePulse > 1.5f) {
+                for (i in 0 until 12) {
+                    val rad = Math.toRadians((i * 30 - angle * 2).toDouble())
+                    val innerR = outRadius + 10f
+                    val outerR = innerR + (voicePulse * 8f)
+                    canvas.drawLine(
+                        cx + innerR * cos(rad).toFloat(), cy + innerR * sin(rad).toFloat(),
+                        cx + outerR * cos(rad).toFloat(), cy + outerR * sin(rad).toFloat(),
+                        glowCyan
+                    )
+                }
             }
+
+            // Central Icon/Text
             canvas.drawText("B", cx, cy - ((textPaint.descent() + textPaint.ascent()) / 2), textPaint)
         }
     }
