@@ -3,9 +3,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    
+    <!-- 🔴 BEEP SOUND MUTE KARNE KE LIYE ZAROORI PERMISSION 🔴 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
-    <!-- 🔴 ANDROID 11+ KE LIYE SABSE ZAROORI PERMISSION (Iske bina mic on nahi hota) 🔴 -->
+    <!-- 🔴 ANDROID 11+ KE LIYE SABSE ZAROORI PERMISSION (Mic aur Natural Voice ke liye) 🔴 -->
     <queries>
+        <!-- Google Speech & TTS Engines ko direct access dene ke liye -->
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.google.android.tts" />
+
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
