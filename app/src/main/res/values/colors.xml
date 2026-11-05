@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Butki-Ai Dark Futuristic Theme -->
+    <color name="black">#020205</color>
+    <color name="white">#FFFFFF</color>
+    <color name="background_dark">#0A0B1A</color>
+    <color name="neon_blue">#00F0FF</color>
+    <color name="neon_blue_dark">#008B94</color>
+    
+    <!-- App Main Theme Colors -->
+    <color name="colorPrimary">@color/neon_blue</color>
+    <color name="colorPrimaryDark">@color/black</color>
+    <color name="colorAccent">@color/neon_blue</color>
+    
+    <color name="textColorPrimary">@color/white</color>
+    <color name="textColorSecondary">@color/neon_blue_dark</color>
+</resources>
