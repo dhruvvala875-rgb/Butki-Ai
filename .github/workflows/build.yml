@@ -36,6 +36,9 @@ jobs:
         }
         EOF
 
+    - name: Generate gradlew if missing
+      run: gradle wrapper
+
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
