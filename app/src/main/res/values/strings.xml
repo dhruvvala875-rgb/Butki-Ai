@@ -1,0 +1,13 @@
+<resources>
+    <!-- Butki-Ai Core Strings -->
+    <string name="app_name">Butki-Ai</string>
+    <string name="hello_sir">Hey, Butki Here</string>
+    <string name="listening_status">Listening...</string>
+    <string name="processing_status">Thinking...</string>
+    <string name="ready_status">Ready</string>
+    <string name="error_status">Error! Please try again.</string>
+    
+    <!-- Permissions and UI -->
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="permissions_granted">All required permissions are granted.</string>
+</resources>
