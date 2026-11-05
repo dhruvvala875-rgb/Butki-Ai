@@ -62,7 +62,7 @@ class MainActivity : AppCompatActivity() {
                     statusTextView.text = "[ SYS: BUTKI-AI ACTIVE ]"
                     deltaSymbol.setColor(Color.parseColor("#00F0FF"))
                     deltaSymbol.startGlow()
-                    Toast.makeText(this@Context as? MainActivity ?: context, "Butki-Ai is awake!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Butki-Ai is awake!", Toast.LENGTH_SHORT).show()
                 } else {
                     statusTextView.text = "[ SYS: IDLE - TAP TO WAKE ]"
                     deltaSymbol.setColor(Color.parseColor("#444444"))
