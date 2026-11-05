@@ -1,6 +1,7 @@
 name: Build Android APK
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
 
@@ -9,25 +10,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up JDK 17
+    - name: set up JDK 17
       uses: actions/setup-java@v4
       with:
-        distribution: 'temurin'
         java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
 
-    - name: Setup Gradle 8.2
-      uses: gradle/actions/setup-gradle@v3
-      with:
-        gradle-version: '8.2'
+    - name: Create dummy google-services.json
+      run: |
+        PACKAGE_NAME=$(grep -oP 'applicationId\s*=\s*"\K[^"]+' app/build.gradle.kts || echo "com.rgb.butki")
+        cat <<EOF > app/google-services.json
+        {
+          "project_info": { "project_number": "123456789012", "project_id": "dummy-project" },
+          "client": [ {
+              "client_info": {
+                "mobilesdk_app_id": "1:123456789012:android:1234567890abcdef",
+                "android_client_info": { "package_name": "$PACKAGE_NAME" }
+              },
+              "api_key": [ {"current_key": "dummy-key"} ]
+            } ],
+          "configuration_version": "1"
+        }
+        EOF
 
-    - name: Build Debug APK with Gradle
-      run: gradle :app:assembleDebug
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
 
-    - name: Upload APK Artifact
+    - name: Build with Gradle
+      run: ./gradlew assembleDebug
+
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: Butki-App-APK
+        name: Butki-Ai
         path: app/build/outputs/apk/debug/app-debug.apk
