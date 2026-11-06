@@ -30,12 +30,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -56,13 +51,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
     private var recordingJob: Job? = null
-    private val isContinuousMode = true 
+    private val isContinuousMode = false // Set to false initially to prevent instant crash before permission/key
 
     private val sampleRate = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     
-    private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat) * 4
+    private var bufferSize = 2048
     private val silenceThreshold = 80.0 
     private val maxSilenceMillis = 1500L 
 
@@ -82,10 +77,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         sharedPreferences = getSharedPreferences("ButkiPrefs", Context.MODE_PRIVATE)
 
+        try {
+            val minBuf = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            if (minBuf > 0) {
+                bufferSize = minBuf * 2
+            }
+        } catch (e: Exception) {
+            bufferSize = 4096
+        }
+
         setupFuturisticUI()
         
-        tts = TextToSpeech(this, this, "com.google.android.tts")
+        try {
+            tts = TextToSpeech(this, this, "com.google.android.tts")
+        } catch (e: Exception) {
+            // Fallback if TTS fails
+        }
 
+        // Check Permissions safely
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
         }
@@ -101,7 +110,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     @SuppressLint("MissingPermission")
     private fun startSeamlessListening() {
         if (isRecording) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            txtStatus.text = "[ SYS: MIC PERMISSION REQUIRED ]"
+            return
+        }
+        if (geminiApiKey.isEmpty()) {
+            showApiKeyDialog()
+            return
+        }
 
         mainHandler.post {
             try {
@@ -116,10 +132,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     bufferSize
                 )
                 
+                if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                    txtStatus.text = "[ SYS: MIC INIT FAILED ]"
+                    return@post
+                }
+
                 audioRecord?.startRecording()
                 isRecording = true
 
-                txtStatus.text = "[ SYS: LISTENING... (SPEAK NOW) ]"
+                txtStatus.text = "[ SYS: LISTENING... (TAP ORB TO STOP) ]"
                 txtStatus.setTextColor(Color.parseColor("#00F0FF"))
                 neonVisualizer.setMode(3) 
 
@@ -179,6 +200,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 isRecording = false
+                mainHandler.post {
+                    txtStatus.text = "[ SYS: AUDIO ERROR ]"
+                }
             }
         }
     }
@@ -238,6 +262,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 if (key.isNotEmpty()) {
                     sharedPreferences.edit().putString("GEMINI_API_KEY", key).apply()
                     geminiApiKey = key
+                    txtStatus.text = "[ SYS: IDLE - TAP ORB TO SPEAK ]"
                 } else {
                     showApiKeyDialog() 
                 }
@@ -254,7 +279,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         txtStatus = TextView(this).apply {
-            text = "[ SYS: INITIALIZING... ]"
+            text = "[ SYS: TAP ORB TO START ]"
             setTextColor(Color.parseColor("#00F0FF"))
             textSize = 14f
             typeface = Typeface.MONOSPACE
@@ -297,7 +322,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         root.addView(neonVisualizer, orbParams)
 
         txtResponse = TextView(this).apply {
-            text = "> SYSTEM READY. SPEAK TO BUTKI..."
+            text = "> SYSTEM READY. TAP ORB TO SPEAK..."
             setTextColor(Color.parseColor("#FFFFFF"))
             textSize = 16f
             typeface = Typeface.MONOSPACE
@@ -386,143 +411,3 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     txtResponse.text = "> FAILURE: ${e.message}"
-                    speakOut("Boss, kuch error aaya hai.")
-                }
-            }
-        }
-    }
-
-    private fun handleAIResponse(reply: String) {
-        txtResponse.text = "> RESPONSE:\n$reply"
-        speakOut(reply)
-    }
-
-    private fun speakOut(text: String) {
-        if (::tts.isInitialized) {
-            isSpeaking = true
-            txtStatus.text = "[ SYS: SPEAKING... ]"
-            txtStatus.setTextColor(Color.parseColor("#FFFFFF"))
-            neonVisualizer.setMode(2) 
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ButkiVoice")
-        }
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val result = tts.setLanguage(Locale("hi", "IN"))
-            if (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED) {
-                 val voice = Voice("hi-IN-language", Locale("hi", "IN"), Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, emptySet())
-                 tts.voice = voice
-            }
-            
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) {
-                    isSpeaking = false
-                    if (isContinuousMode) {
-                        mainHandler.post {
-                            startSeamlessListening()
-                        }
-                    }
-                }
-                override fun onError(utteranceId: String?) {
-                    isSpeaking = false
-                }
-            })
-            
-            if (isContinuousMode && !isRecording) {
-                 mainHandler.post { startSeamlessListening() }
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        if (::tts.isInitialized) {
-            tts.stop()
-            tts.shutdown()
-        }
-        stopSeamlessListening()
-        super.onDestroy()
-    }
-}
-
-class NeonOrbView(context: Context) : View(context) {
-
-    private val paintCore = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val paintGlow1 = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private val paintGlow2 = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-
-    private var currentMode = 0 
-    private var voiceLevel = 1f 
-    
-    private var time = 0f
-    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-        duration = 1000
-        repeatCount = ValueAnimator.INFINITE
-        interpolator = LinearInterpolator()
-        addUpdateListener {
-            time += 0.1f
-            invalidate()
-        }
-    }
-
-    init {
-        animator.start()
-    }
-
-    fun setMode(mode: Int) {
-        this.currentMode = mode
-        if (mode == 0) voiceLevel = 1f
-    }
-
-    fun updateVoiceLevel(level: Float) {
-        this.voiceLevel = level
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val cx = width / 2f
-        val cy = height / 2f
-        val baseRadius = (width.coerceAtMost(height) / 4f)
-
-        when (currentMode) {
-            0 -> { 
-                paintCore.color = Color.parseColor("#444444")
-                paintGlow1.color = Color.TRANSPARENT
-                paintGlow2.color = Color.TRANSPARENT
-                canvas.drawCircle(cx, cy, baseRadius, paintCore)
-            }
-            1 -> { 
-                val rOffset = (sin(time) * 20f)
-                val colorHex = "#008B94" 
-                
-                paintCore.color = Color.parseColor(colorHex)
-                paintGlow1.color = Color.parseColor("#44$colorHex".replace("##", "#")) 
-                canvas.drawCircle(cx, cy, baseRadius + 30f + rOffset, paintGlow1)
-                paintGlow2.color = Color.parseColor("#22$colorHex".replace("##", "#"))
-                canvas.drawCircle(cx, cy, baseRadius + 60f + (rOffset * 1.5f), paintGlow2)
-                canvas.drawCircle(cx, cy, baseRadius, paintCore)
-            }
-            2 -> { 
-                val rOffset = (cos(time * 1.5f) * 30f)
-                val colorHex = "#FFFFFF" 
-                
-                paintCore.color = Color.parseColor(colorHex)
-                paintGlow1.color = Color.parseColor("#66$colorHex".replace("##", "#"))
-                canvas.drawCircle(cx, cy, baseRadius + 40f + rOffset, paintGlow1)
-                canvas.drawCircle(cx, cy, baseRadius, paintCore)
-            }
-            3 -> { 
-                val dynamicRadius = baseRadius * voiceLevel
-                val colorHex = "#00F0FF" 
-                
-                paintCore.color = Color.parseColor(colorHex)
-                paintGlow1.color = Color.parseColor("#55$colorHex".replace("##", "#"))
-                canvas.drawCircle(cx, cy, dynamicRadius + 40f, paintGlow1)
-                paintGlow2.color = Color.parseColor("#22$colorHex".replace("##", "#"))
-                canvas.drawCircle(cx, cy, dynamicRadius + 80f, paintGlow2)
-                canvas.drawCircle(cx, cy, baseRadius, paintCore)
-            }
-        }
-    }
-}
