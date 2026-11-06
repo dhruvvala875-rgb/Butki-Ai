@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
     private var recordingJob: Job? = null
-    private val isContinuousMode = false // Set to false initially to prevent instant crash before permission/key
+    private val isContinuousMode = false
 
     private val sampleRate = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
@@ -90,11 +90,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         
         try {
             tts = TextToSpeech(this, this, "com.google.android.tts")
-        } catch (e: Exception) {
-            // Fallback if TTS fails
-        }
+        } catch (e: Exception) {}
 
-        // Check Permissions safely
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 100)
         }
@@ -397,17 +394,4 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         .getJSONObject("content")
                         .getJSONArray("parts")
                         .getJSONObject(0)
-                        .getString("text")
-
-                    withContext(Dispatchers.Main) {
-                        handleAIResponse(reply.trim())
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        txtResponse.text = "> ERROR: $responseCode"
-                        speakOut("Boss, server se connect karne mein problem aa rahi hai.")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    txtResponse.text = "> FAILURE: ${e.message}"
+                        
