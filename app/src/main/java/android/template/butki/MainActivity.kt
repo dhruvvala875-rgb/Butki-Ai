@@ -51,13 +51,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
     private var recordingJob: Job? = null
-    private val isContinuousMode = false
 
     private val sampleRate = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-    
-    private var bufferSize = 2048
+    private var bufferSize = 4096
     private val silenceThreshold = 80.0 
     private val maxSilenceMillis = 1500L 
 
@@ -79,12 +77,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         try {
             val minBuf = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-            if (minBuf > 0) {
-                bufferSize = minBuf * 2
-            }
-        } catch (e: Exception) {
-            bufferSize = 4096
-        }
+            if (minBuf > 0) bufferSize = minBuf * 2
+        } catch (e: Exception) {}
 
         setupFuturisticUI()
         
@@ -137,7 +131,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 audioRecord?.startRecording()
                 isRecording = true
 
-                txtStatus.text = "[ SYS: LISTENING... (TAP ORB TO STOP) ]"
+                txtStatus.text = "[ SYS: LISTENING... (SPEAK NOW) ]"
                 txtStatus.setTextColor(Color.parseColor("#00F0FF"))
                 neonVisualizer.setMode(3) 
 
@@ -197,9 +191,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             } catch (e: Exception) {
                 isRecording = false
-                mainHandler.post {
-                    txtStatus.text = "[ SYS: AUDIO ERROR ]"
-                }
+                mainHandler.post { txtStatus.text = "[ SYS: AUDIO ERROR ]" }
             }
         }
     }
@@ -251,7 +243,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         AlertDialog.Builder(this)
             .setTitle("BUTKI-AI AUTHENTICATION")
-            .setMessage("Boss, please enter your Gemini API Key to initialize:")
+            .setMessage("Boss, please enter your Gemini API Key:")
             .setView(input)
             .setCancelable(false)
             .setPositiveButton("INITIALIZE") { _, _ ->
@@ -354,7 +346,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.doOutput = true
 
-                val instruction = "Tu mera smart AI assistant hai 'Butki'. Mera naam Dhruvkumar Dharmendrabhai Vala hai. Main gujarati samajh sakta hu par hindi bhi theek se janta hu. Main abhi ek android app bana raha hu Butki-Ai name se jisme tu kaam karega. Tu short or seedhi hindi/hinglish me jawab dega."
+                val instruction = "Tu mera smart AI assistant hai 'Butki'. Mera naam Dhruvkumar Dharmendrabhai Vala hai. Main gujarati samajh sakta hu par hindi bhi theek se janta hu. Tu short aur seedhi hinglish me jawab dega."
                 
                 val jsonBody = JSONObject().apply {
                     put("contents", JSONArray().apply {
@@ -375,9 +367,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             put(JSONObject().apply { put("text", instruction) })
                         })
                     })
-                    put("generationConfig", JSONObject().apply {
-                        put("temperature", 0.7)
-                    })
                 }
 
                 val os = DataOutputStream(conn.outputStream)
@@ -385,8 +374,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 os.flush()
                 os.close()
 
-                val responseCode = conn.responseCode
-                if (responseCode == 200) {
+                if (conn.responseCode == 200) {
                     val response = conn.inputStream.bufferedReader().use { it.readText() }
                     val jsonResponse = JSONObject(response)
                     val reply = jsonResponse.getJSONArray("candidates")
@@ -394,4 +382,133 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         .getJSONObject("content")
                         .getJSONArray("parts")
                         .getJSONObject(0)
-                        
+                        .getString("text")
+
+                    withContext(Dispatchers.Main) {
+                        handleAIResponse(reply.trim())
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        speakOut("Boss, server error aa gaya hai.")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    speakOut("Boss, connection error hai.")
+                }
+            }
+        }
+    }
+
+    private fun handleAIResponse(reply: String) {
+        txtResponse.text = "> RESPONSE:\n$reply"
+        speakOut(reply)
+    }
+
+    private fun speakOut(text: String) {
+        if (::tts.isInitialized) {
+            isSpeaking = true
+            txtStatus.text = "[ SYS: SPEAKING... ]"
+            txtStatus.setTextColor(Color.parseColor("#FFFFFF"))
+            neonVisualizer.setMode(2) 
+            try {
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ButkiVoice")
+            } catch (e: Exception) {}
+        }
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            try {
+                tts.setLanguage(Locale("hi", "IN"))
+            } catch (e: Exception) {}
+        }
+    }
+
+    override fun onDestroy() {
+        try {
+            if (::tts.isInitialized) {
+                tts.stop()
+                tts.shutdown()
+            }
+        } catch (e: Exception) {}
+        stopSeamlessListening()
+        super.onDestroy()
+    }
+}
+
+class NeonOrbView(context: Context) : View(context) {
+
+    private val paintCore = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val paintGlow1 = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val paintGlow2 = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
+    private var currentMode = 0 
+    private var voiceLevel = 1f 
+    private var time = 0f
+
+    private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 1000
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = LinearInterpolator()
+        addUpdateListener {
+            time += 0.1f
+            invalidate()
+        }
+    }
+
+    init {
+        try { animator.start() } catch (e: Exception) {}
+    }
+
+    fun setMode(mode: Int) {
+        this.currentMode = mode
+        if (mode == 0) voiceLevel = 1f
+        invalidate()
+    }
+
+    fun updateVoiceLevel(level: Float) {
+        this.voiceLevel = level
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val cx = width / 2f
+        val cy = height / 2f
+        val baseRadius = (width.coerceAtMost(height) / 4f)
+
+        when (currentMode) {
+            0 -> { 
+                paintCore.color = Color.parseColor("#444444")
+                paintGlow1.color = Color.TRANSPARENT
+                paintGlow2.color = Color.TRANSPARENT
+                canvas.drawCircle(cx, cy, baseRadius, paintCore)
+            }
+            1 -> { 
+                val rOffset = (sin(time) * 20f)
+                val colorHex = "#008B94" 
+                paintCore.color = Color.parseColor(colorHex)
+                paintGlow1.color = Color.parseColor("#44$colorHex".replace("##", "#")) 
+                canvas.drawCircle(cx, cy, baseRadius + 30f + rOffset, paintGlow1)
+                canvas.drawCircle(cx, cy, baseRadius, paintCore)
+            }
+            2 -> { 
+                val rOffset = (cos(time * 1.5f) * 30f)
+                val colorHex = "#FFFFFF" 
+                paintCore.color = Color.parseColor(colorHex)
+                paintGlow1.color = Color.parseColor("#66$colorHex".replace("##", "#"))
+                canvas.drawCircle(cx, cy, baseRadius + 40f + rOffset, paintGlow1)
+                canvas.drawCircle(cx, cy, baseRadius, paintCore)
+            }
+            3 -> { 
+                val dynamicRadius = baseRadius * voiceLevel
+                val colorHex = "#00F0FF" 
+                paintCore.color = Color.parseColor(colorHex)
+                paintGlow1.color = Color.parseColor("#55$colorHex".replace("##", "#"))
+                canvas.drawCircle(cx, cy, dynamicRadius + 40f, paintGlow1)
+                canvas.drawCircle(cx, cy, baseRadius, paintCore)
+            }
+        }
+    }
+}
