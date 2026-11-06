@@ -134,4 +134,103 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         if (readCount > 0) {
                             var sum = 0.0
                             for (i in 0 until readCount) {
-                                sum += buffer[i].toDouble() * buffer
+                                val valD = buffer[i].toDouble()
+                                sum += valD * valD
+                            }
+                            val rms = sqrt(sum / readCount)
+
+                            withContext(Dispatchers.Main) {
+                                val normalizedLevel = (rms / 250.0).toFloat().coerceIn(0.5f, 12f)
+                                neonVisualizer.updateVoiceLevel(normalizedLevel)
+                            }
+
+                            if (rms > silenceThreshold) {
+                                if (!isUserSpeaking) {
+                                    isUserSpeaking = true
+                                    speechStream.reset()
+                                }
+                                lastSpokeTime = System.currentTimeMillis()
+                            }
+
+                            if (isUserSpeaking) {
+                                for (i in 0 until readCount) {
+                                    val s = buffer[i].toInt()
+                                    speechStream.write(s and 0xFF)
+                                    speechStream.write((s shr 8) and 0xFF)
+                                }
+
+                                if (System.currentTimeMillis() - lastSpokeTime > maxSilenceMillis) {
+                                    isUserSpeaking = false
+                                    val finalPcmBytes = speechStream.toByteArray()
+                                    speechStream.reset()
+
+                                    if (finalPcmBytes.size > 3200) { 
+                                        stopSeamlessListening()
+                                        val wavBytes = pcmToWav(finalPcmBytes)
+                                        withContext(Dispatchers.Main) {
+                                            processSpokenAudio(wavBytes)
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                isRecording = false
+            }
+        }
+    }
+
+    private fun stopSeamlessListening() {
+        isRecording = false
+        try {
+            recordingJob?.cancel()
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (e: Exception) {}
+        audioRecord = null
+    }
+
+    private fun pcmToWav(pcmBytes: ByteArray): ByteArray {
+        val channels = 1.toShort()
+        val bitDepth = 16.toShort()
+        val byteRate = (sampleRate * channels * (bitDepth / 8)).toLong()
+        val totalDataLen = pcmBytes.size + 36
+        val totalAudioLen = pcmBytes.size.toLong()
+
+        val wavFile = ByteArrayOutputStream()
+        val output = DataOutputStream(wavFile)
+
+        output.writeBytes("RIFF")
+        output.writeInt(Integer.reverseBytes(totalDataLen.toInt()))
+        output.writeBytes("WAVE")
+        output.writeBytes("fmt ")
+        output.writeInt(Integer.reverseBytes(16))
+        output.writeShort(java.lang.Short.reverseBytes(1.toShort()).toInt()) 
+        output.writeShort(java.lang.Short.reverseBytes(channels).toInt())       
+        output.writeInt(Integer.reverseBytes(sampleRate))
+        output.writeInt(Integer.reverseBytes(byteRate.toInt()))
+        output.writeShort(java.lang.Short.reverseBytes((channels * (bitDepth / 8)).toShort()).toInt()) 
+        output.writeShort(java.lang.Short.reverseBytes(bitDepth).toInt())     
+        output.writeBytes("data")
+        output.writeInt(Integer.reverseBytes(totalAudioLen.toInt()))
+        output.write(pcmBytes)
+
+        return wavFile.toByteArray()
+    }
+
+    private fun showApiKeyDialog() {
+        val input = EditText(this).apply {
+            hint = "Enter Gemini API Key"
+            setPadding(40, 40, 40, 40)
+            typeface = Typeface.MONOSPACE
+        }
+
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("BUTKI-AI AUTHENTICATION")
+            .setMessage("Boss, please enter your Gemini API Key to initialize:")
+            .setView(input)
+            .setCancelable(false)
+            .setPositiveButton("INITIALIZE
